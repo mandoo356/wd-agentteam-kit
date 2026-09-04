@@ -6,13 +6,13 @@
 #
 #  하는 일
 #    1) 깃허브에서 스타터킷(약 3MB, node_modules·비밀키 없음)을 받는다
-#    2) C:\에이전트\01_KIT\starter-kit 에 표준 설치한다 (install_starterkit.ps1)
-#       — 같이 만들어지는 C:\에이전트\내자료\ 에 수강생이 제안서·블로그·로고를 미리 넣는다
+#    2) C:\Agent\01_KIT\starter-kit 에 표준 설치한다 (install_starterkit.ps1)
+#       — 같이 만들어지는 C:\Agent\MyData\ 에 수강생이 제안서·블로그·로고를 미리 넣는다
 #    3) 환경점검(env_check.ps1)을 이어서 돌린다 — Node·Git·Claude Code 등은 여기서 명령어로 설치
 #
 #  테스트·강사용 환경변수 (선택)
 #    $env:WD_KIT_ZIP      = 'C:\path\kit.zip'   깃허브 대신 로컬 ZIP 사용
-#    $env:WD_INSTALL_ROOT = 'D:\에이전트'   설치 위치 변경
+#    $env:WD_INSTALL_ROOT = 'D:\Agent'   설치 위치 변경
 #    $env:WD_NO_ENVCHECK  = '1'                 환경점검 생략
 #
 #  이 파일은 UTF-8(BOM 없음)이며 raw.githubusercontent.com 이 charset=utf-8 로 내려준다.
@@ -34,7 +34,7 @@ $Repo   = 'mandoo356/wd-agentteam-kit'
 $Branch = 'main'
 $ZipUrl = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
 
-$Root = 'C:\에이전트'
+$Root = 'C:\Agent'
 if ($env:WD_INSTALL_ROOT) { $Root = $env:WD_INSTALL_ROOT }
 $Root = [IO.Path]::GetFullPath($Root)
 $Kit  = Join-Path $Root '01_KIT\starter-kit'
@@ -109,7 +109,7 @@ $srcCount = (Get-ChildItem -LiteralPath $srcKit -File -Force -Recurse | Measure-
 Info "스타터킷 파일 $srcCount 개 확인"
 
 # ── 4. 표준 위치에 설치 ─────────────────────────────────────
-Step 'C:\에이전트 표준 폴더 만들고 스타터킷 설치'
+Step 'C:\Agent 표준 폴더 만들고 스타터킷 설치'
 $code = Run-Script $installer.FullName @('-InstallRoot', $Root, '-NoOpen', '-SkipEnvironmentCheck')
 if ($code -ne 0) { Fail "설치 스크립트가 실패했습니다 (종료코드 $code)." }
 if (-not (Test-Path -LiteralPath (Join-Path $Kit '환경점검.bat'))) { Fail "설치 후 $Kit 에 환경점검.bat 이 없습니다." }
@@ -124,7 +124,7 @@ Write-Host ''
 Write-Host "  ✅ 스타터킷 설치 완료 ($elapsed 초)" -ForegroundColor Green
 Info "위치: $Kit"
 Info "다음: 환경점검 → 카드 P0 부터"
-Info "내 자료: $Root\내자료 에 제안서 3·블로그 3·로고 1 을 수업 전에 넣어 두세요"
+Info "내 자료: $Root\MyData 에 제안서 3·블로그 3·로고 1 을 수업 전에 넣어 두세요"
 
 # ── 6. 환경점검 이어서 ───────────────────────────────────────
 if ($env:WD_NO_ENVCHECK) {

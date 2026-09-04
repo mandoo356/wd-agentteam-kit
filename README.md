@@ -16,15 +16,15 @@ irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/install.ps
 | 단계 | 내용 | 걸리는 시간 |
 |---|---|---|
 | 1 | 깃허브에서 스타터킷을 받는다 (약 3MB, `node_modules`·비밀키 없음) | 수 초 |
-| 2 | `C:\에이전트\01_KIT\starter-kit` 에 표준 설치한다. `C:\에이전트\내자료\` 도 같이 만든다 | 수 초 |
+| 2 | `C:\Agent\01_KIT\starter-kit` 에 표준 설치한다. `C:\Agent\MyData\` 도 같이 만든다 | 수 초 |
 | 3 | 환경점검을 이어서 돌린다 — Node·Git·Python·Claude Code 가 없으면 **명령어(winget/npm)로 설치** | 없는 것에 따라 몇 분 |
 
 기존 설치가 있으면 덮어쓰지 않습니다. 인터넷이 켜져 있어야 합니다.
 
 ## 설치 후
 
-- `C:\에이전트\01_KIT\starter-kit\README.md` — 폴더 설명과 카드 사용법
-- `C:\에이전트\내자료\` — **제안서 3개·블로그 글 3개·회사 로고**를 수업 전에 넣어 두는 곳 (`제안서\` `블로그\` `로고\` `프로필\`)
+- `C:\Agent\01_KIT\starter-kit\README.md` — 폴더 설명과 카드 사용법
+- `C:\Agent\MyData\` — **제안서 3개·블로그 글 3개·회사 로고**를 수업 전에 넣어 두는 곳 (`Proposal\` 제안서 · `Blog\` 블로그 · `Logo\` 로고 · `Profile\` 프로필)
 - `프롬프트카드.md` — 강의장에서 모듈 0~6 순서대로
 - 가상 오피스(`office/`)는 모듈 5에서 `npm ci` 로 의존성을 내려받습니다 (약 690MB, 인터넷 속도에 따라 다름)
 

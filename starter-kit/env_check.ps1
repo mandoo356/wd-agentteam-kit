@@ -307,19 +307,19 @@ function Check-Folders {
 }
 
 function Check-MyData {
-    # 표준 설치(C:\에이전트\01_KIT\starter-kit)면 두 단계 위가 회사 건물 — 그 안의 내자료\ 를 센다
+    # 표준 설치(C:\Agent\01_KIT\starter-kit)면 두 단계 위가 회사 건물 — 그 안의 MyData\ 를 센다
     $root = Split-Path -Parent $COURSE
-    $base = Join-Path $root '내자료'
+    $base = Join-Path $root 'MyData'
     if ((Split-Path -Leaf $COURSE) -ne '01_KIT' -or -not (Test-Path $base)) {
-        Set-Result 'mydata' '내 자료 (제안서 3·블로그 3·로고 1)' '선택' $false '내자료 폴더 없음 — 표준 설치가 아니면 건너뜁니다'
+        Set-Result 'mydata' '내 자료 (제안서 3·블로그 3·로고 1)' '선택' $false 'MyData 폴더 없음 — 표준 설치가 아니면 건너뜁니다'
         return
     }
     $n = @{}
-    foreach ($k in '제안서','블로그','로고','프로필') {
+    foreach ($k in 'Proposal','Blog','Logo','Profile') {
         $n[$k] = @(Get-ChildItem -LiteralPath (Join-Path $base $k) -File -ErrorAction SilentlyContinue).Count
     }
-    $ok = ($n['제안서'] -ge 3) -and ($n['블로그'] -ge 3) -and ($n['로고'] -ge 1)
-    $d = "제안서 $($n['제안서'])개 · 블로그 $($n['블로그'])개 · 로고 $($n['로고'])개 · 프로필 $($n['프로필'])개 — $base"
+    $ok = ($n['Proposal'] -ge 3) -and ($n['Blog'] -ge 3) -and ($n['Logo'] -ge 1)
+    $d = "제안서(Proposal) $($n['Proposal'])개 · 블로그(Blog) $($n['Blog'])개 · 로고(Logo) $($n['Logo'])개 · 프로필(Profile) $($n['Profile'])개 — $base"
     Set-Result 'mydata' '내 자료 (제안서 3·블로그 3·로고 1)' '선택' $ok $d "$base 에 파일을 넣으세요 (모듈 3.5 전까지)"
 }
 

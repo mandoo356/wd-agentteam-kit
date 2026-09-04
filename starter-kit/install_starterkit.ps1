@@ -2,8 +2,8 @@
   install_starterkit.ps1
 
   더블클릭 설치용 본체.
-  - C:\에이전트 표준 구조를 만든다.
-  - 내자료\제안서·블로그·로고·프로필 폴더를 만들어 수강생이 미리 자료를 넣을 자리를 준다.
+  - C:\Agent 표준 구조를 만든다.
+  - MyData\Proposal·Blog·Logo·Profile(제안서·블로그·로고·프로필) 폴더를 만들어 수강생이 미리 자료를 넣을 자리를 준다.
   - 현재 스타터킷을 01_KIT\starter-kit 으로 복사한다.
   - 이동을 느리게 하는 node_modules 및 재생성 파일은 복사하지 않는다.
   - 실제 비밀키와 로그인 상태는 복사하지 않는다.
@@ -11,7 +11,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$InstallRoot = 'C:\에이전트',
+    [string]$InstallRoot = 'C:\Agent',
     [switch]$NoOpen,
     [switch]$SkipEnvironmentCheck
 )
@@ -69,10 +69,10 @@ $folders = @(
     '05_EXPORT\html',
     '05_EXPORT\pdf',
     '90_TEMP',
-    '내자료\제안서',
-    '내자료\블로그',
-    '내자료\로고',
-    '내자료\프로필'
+    'MyData\Proposal',
+    'MyData\Blog',
+    'MyData\Logo',
+    'MyData\Profile'
 )
 
 try {
@@ -85,22 +85,23 @@ try {
 }
 Write-Info "$($folders.Count)개 표준 폴더 확인"
 
-# 내자료 안내문 — 수강생이 수업 전에 뭘 어디에 넣을지
-$guide = Join-Path $targetRoot '내자료\여기에_넣으세요.txt'
+# MyData 안내문 — 수강생이 수업 전에 뭘 어디에 넣을지
+$guide = Join-Path $targetRoot 'MyData\여기에_넣으세요.txt'
 if (-not (Test-Path -LiteralPath $guide)) {
     @(
         '내 자료 폴더 — 수업 전에 미리 넣어 두세요',
         '',
-        '  제안서\   내가 실제로 보낸 제안서 3개 (pptx·pdf·docx·hwp)',
-        '  블로그\   내가 쓴 블로그 글 3개 (txt·docx·pdf, 또는 글 주소를 적은 txt)',
-        '  로고\     회사 로고 1개 (png·jpg·svg) — 명함·홈페이지 캡처도 됩니다',
-        '  프로필\   (선택) 강사 프로필·이력서 3개',
+        '  Proposal\  제안서 — 내가 실제로 보낸 제안서 3개 (pptx·pdf·docx·hwp)',
+        '  Blog\      블로그 — 내가 쓴 블로그 글 3개 (txt·docx·pdf, 또는 글 주소를 적은 txt)',
+        '  Logo\      로고 — 회사 로고 1개 (png·jpg·svg). 명함·홈페이지 캡처도 됩니다',
+        '  Profile\   프로필 — (선택) 강사 프로필·이력서 3개',
         '',
+        '폴더 이름이 영문인 이유: 프로그램이 한글 경로에서 드물게 막히는 일을 없애기 위해서입니다.',
         '직원(AI)은 이 폴더를 읽기만 하고 원본을 고치지 않습니다.',
         '없는 것은 비워 두어도 수업은 진행됩니다. 모듈 3.5(내 자료) 전까지만 채우면 됩니다.'
     ) | Set-Content -LiteralPath $guide -Encoding UTF8
 }
-Write-Info "내자료 안내문: $guide"
+Write-Info "MyData 안내문: $guide"
 
 Write-Step '가벼운 스타터킷 설치'
 if (Test-Path -LiteralPath $marker) {
@@ -174,7 +175,7 @@ Write-Step '설치 결과'
 Write-Host "  ✅ 표준 폴더와 스타터킷 준비됨" -ForegroundColor Green
 Write-Info "스타터킷: $targetKit"
 Write-Info "기록: $logFile"
-Write-Info "내 자료: $(Join-Path $targetRoot '내자료') — 제안서 3·블로그 3·로고 1 을 수업 전에 넣어 두세요"
+Write-Info "내 자료: $(Join-Path $targetRoot 'MyData') — 제안서 3·블로그 3·로고 1 을 수업 전에 넣어 두세요"
 Write-Host ''
 Write-Host '  node_modules는 이동 속도와 PC 호환성 문제 때문에 제외했습니다.' -ForegroundColor Yellow
 Write-Host '  환경점검에서 안내하는 npm 설치를 대상 PC에서 진행하세요.' -ForegroundColor Yellow
