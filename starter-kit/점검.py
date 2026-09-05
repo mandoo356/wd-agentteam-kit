@@ -396,6 +396,22 @@ def module_4():
         checks.append(("열쇠 모양이 맞다 (xoxb / xapp)", not shape,
                        "정상" if not shape else " / ".join(shape)))
 
+        # 🔒 내 멤버 ID(OWNER_USER_ID). 이게 있어야 직원이 "나"를 알아보고 실행한다.
+        #    값은 찍지 않고 모양만 본다 — 슬랙 사용자 ID 는 U(또는 W) 로 시작한다.
+        raw = vals.get("OWNER_USER_ID", "")
+        v = raw.strip()
+        if not v:
+            owner_msg = "비어 있음 — 슬랙 앱 → 내 프로필 사진 → 프로필 → ⋯ 더보기 → 멤버 ID 복사"
+        elif v[:1] in "\"'" or v[-1:] in "\"'":
+            owner_msg = "따옴표를 지우세요"
+        elif raw != raw.rstrip() or raw[:1] == " ":
+            owner_msg = "앞뒤 공백을 지우세요"
+        elif not v[:1].upper() in ("U", "W") or len(v) < 9 or not v.isalnum():
+            owner_msg = "U 로 시작하는 멤버 ID 가 아닙니다 (이메일·이름이 아니라 '멤버 ID 복사' 값)"
+        else:
+            owner_msg = "정상"
+        checks.append(("내 멤버 ID 를 넣었다 (OWNER_USER_ID)", owner_msg == "정상", owner_msg))
+
         # 메모장으로 저장하면 맨 앞에 안 보이는 표식(BOM)이 붙는다. server.py 는 견디지만
         # 다른 도구로 열면 첫 줄을 못 읽으므로 여기서 미리 알려준다.
         try:

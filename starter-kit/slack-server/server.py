@@ -39,14 +39,16 @@ KIT_ROOT = HERE.parent                       # 스타터킷 폴더
 # "열쇠가 비어 있다"고 나온다. 값은 멀쩡히 들어 있는데도. 강의장에서 제일 잡기 어려운 종류다.
 load_dotenv(HERE / ".env", encoding="utf-8-sig")
 
-MISSING = [k for k in ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN")
+MISSING = [k for k in ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "OWNER_USER_ID")
            if not os.environ.get(k, "").strip()]
 if MISSING:
     print()
     print("  ❌ .env 에 이게 비어 있습니다: " + ", ".join(MISSING))
     print()
     print("  1) slack-server 폴더의 .env.example 을 복사해서 .env 로 이름을 바꾸고")
-    print("  2) 사전 안내문에서 받은 열쇠 2개를 붙여넣으세요.")
+    print("  2) 열쇠 2개(xoxb-, xapp-)와 내 멤버 ID(U…)를 붙여넣으세요.")
+    if "OWNER_USER_ID" in MISSING:
+        print("     멤버 ID 는 슬랙 앱 → 내 프로필 사진 → 프로필 → ⋯ 더보기 → 멤버 ID 복사")
     print()
     sys.exit(1)
 
@@ -89,14 +91,8 @@ if AGENT_COUNT == 0:
 # 🔒 직원은 파일을 읽고 쓸 수 있는 권한(bypassPermissions)으로 실행된다. OWNER_USER_ID가
 # 비어 있으면 이 워크스페이스에서 봇에게 말을 걸 수 있는 사람 누구나 그 권한을 쓴다 —
 # DM은 원래 나 혼자지만, 채널에 초대(/invite)하면 그 채널의 다른 사람도 포함된다.
-if OWNER_USER_ID:
-    log.info("본인 확인: OWNER_USER_ID 설정됨 — 그 외 사용자는 응답만 받고 실행은 거절됩니다")
-else:
-    log.warning("⚠️  OWNER_USER_ID가 비어 있습니다 — 지금은 이 봇에게 말 거는 사람 누구나 "
-                "파일을 읽고 쓸 수 있는 권한으로 직원을 실행시킬 수 있습니다. "
-                "혼자만 쓰는 DM이면 괜찮지만, 채널에 초대했거나 워크스페이스에 다른 사람이 "
-                "있다면 .env에 OWNER_USER_ID를 채우세요(슬랙에서 내 프로필 → "
-                "'더보기'  → '멤버 ID 복사').")
+# OWNER_USER_ID 는 위에서 비어 있으면 이미 종료됐다. 여기서는 설정됐음을 남기기만 한다.
+log.info("본인 확인: OWNER_USER_ID 설정됨 — 그 외 사용자는 응답만 받고 실행은 거절됩니다")
 
 app = AsyncApp(token=SLACK_BOT_TOKEN)
 
