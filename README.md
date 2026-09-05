@@ -11,6 +11,12 @@
 irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/install.ps1 | iex
 ```
 
+**CMD 창밖에 안 열리면**(줄 맨 앞에 `PS` 가 없으면) 아래 한 줄을 대신 붙여넣습니다. 파워셸을 잠깐 빌려 똑같이 설치합니다.
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/install.ps1 | iex"
+```
+
 ## 이 한 줄이 하는 일
 
 | 단계 | 내용 | 걸리는 시간 |

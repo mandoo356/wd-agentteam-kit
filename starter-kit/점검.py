@@ -176,6 +176,25 @@ def module_0():
     checks.append(("스타터킷 폴더 구조", not missing,
                    "정상" if not missing else "없는 폴더: " + ", ".join(missing)))
 
+    # 자동 저장·안전장치 (.claude/settings.json + hooks 2개). 이게 없으면 직원이 한 일이 기록되지 않고
+    # 삭제·덮어쓰기도 확인 없이 지나간다.
+    hooks = [".claude/settings.json", ".claude/hooks/autosave.py", ".claude/hooks/guard.py"]
+    lost = [h for h in hooks if not (ROOT / h).is_file()]
+    ok_json = True
+    if not lost:
+        try:
+            import json
+            cfg = json.loads((ROOT / ".claude/settings.json").read_text(encoding="utf-8"))
+            ok_json = bool(cfg.get("hooks", {}).get("PreToolUse")) and bool(cfg.get("hooks", {}).get("Stop"))
+        except Exception:
+            ok_json = False
+    checks.append(("자동 저장·안전장치 (기록 + 삭제 확인)", not lost and ok_json,
+                   "켜져 있음" if not lost and ok_json else
+                   ("없는 파일: " + ", ".join(lost) if lost else "settings.json 이 깨졌습니다 → 스타터킷 원본에서 다시 복사")))
+    launcher = shutil.which("py")
+    checks.append(("py 실행기 (안전장치가 py -3 로 돈다)", launcher is not None,
+                   launcher or "py 가 없습니다 → Python 설치 시 'py launcher' 포함으로 재설치"))
+
     checks.append(("한글 경로에서 실행 중", True, str(ROOT)))
     return checks
 

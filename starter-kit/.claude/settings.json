@@ -1,0 +1,63 @@
+{
+  "_설명": "위드드림 스타터킷 안전장치. ① 직원이 한 일은 workspace/기록/ 에 자동으로 남고 한 번 답이 끝날 때마다 git 에 자동 저장된다. ② 파일 삭제·덮어쓰기·규약 변경은 실행 전에 반드시 대표에게 묻는다. 이 파일은 고치지 마세요.",
+  "permissions": {
+    "ask": [
+      "Bash(rm *)",
+      "Bash(del *)",
+      "Bash(erase *)",
+      "Bash(rmdir *)",
+      "Bash(rd *)",
+      "Bash(Remove-Item *)",
+      "Bash(git checkout *)",
+      "Bash(git restore *)",
+      "Bash(git reset *)",
+      "Bash(git clean *)",
+      "Bash(git rm *)",
+      "Bash(git stash *)",
+      "Bash(git push *)"
+    ],
+    "deny": [
+      "Bash(format *)",
+      "Bash(diskpart*)",
+      "Bash(Format-Volume*)",
+      "Bash(Clear-Disk*)",
+      "Edit(점검.py)",
+      "Edit(.claude/settings.json)",
+      "Edit(.claude/hooks/**)",
+      "Read(slack-server/.env)",
+      "Read(naver-blog/.env)"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "py -3 .claude/hooks/autosave.py", "timeout": 10 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit",
+        "hooks": [
+          { "type": "command", "command": "py -3 .claude/hooks/guard.py", "timeout": 10 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit",
+        "hooks": [
+          { "type": "command", "command": "py -3 .claude/hooks/autosave.py", "timeout": 10 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "py -3 .claude/hooks/autosave.py", "timeout": 60 }
+        ]
+      }
+    ]
+  }
+}

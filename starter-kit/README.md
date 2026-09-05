@@ -13,6 +13,12 @@
 irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/install.ps1 | iex
 ```
 
+**CMD 창밖에 안 열리면**(줄 맨 앞에 `PS` 가 없으면) 아래 한 줄을 대신 붙여넣습니다. 파워셸을 잠깐 빌려 똑같이 설치합니다.
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/install.ps1 | iex"
+```
+
 이 한 줄이 스타터킷을 받아 `C:\Agent\01_KIT\starter-kit` 에 설치하고, 환경점검까지 이어서 돌립니다.
 같이 만들어지는 **`C:\Agent\MyData\`** 에 제안서 3개·블로그 글 3개·회사 로고를 수업 전에 넣어 두세요 (아래).
 프로그램(Node·Git·Claude Code…)도 설치 파일을 받는 게 아니라 **명령어로** 깔립니다. Y 만 누르면 됩니다.
@@ -149,6 +155,18 @@ py 점검.py 2     ← 모듈 2가 끝났으면
 채점에는 안 들어가니 열어보고 참고만 하세요. 여러분이 만드는 진짜 파일은 `.txt` 없이 만듭니다.
 
 ---
+
+## 직원이 한 일은 자동으로 남고, 지우는 일은 꼭 묻습니다
+
+스타터킷에 **안전장치**가 들어 있습니다 (`.claude/settings.json` + `.claude/hooks/`). 켜거나 설정할 것은 없습니다.
+
+| 무엇 | 어떻게 |
+|---|---|
+| 자동 기록 | 내가 친 명령·직원이 만들고 고친 파일이 `workspace/기록/작업기록_<날짜>.md` 에 한 줄씩 남습니다 |
+| 자동 저장 | 직원이 답을 마칠 때마다 git 에 자동 저장 지점이 생깁니다 (모듈 0 의 `git init` 이후). `git log --oneline` 으로 봅니다 |
+| 삭제·덮어쓰기 확인 | 파일 삭제 · 기존 파일 덮어쓰기 · 직원/스킬/팀 규약 수정 · `git checkout`류는 실행 전 **확인 창**이 뜹니다. 고르기 전엔 실행되지 않습니다 |
+| 못 고치는 것 | `점검.py` · `.claude/settings.json` · `.claude/hooks/` — 직원이 수정하려 하면 막힙니다 |
+| 슬랙 | 확인 창을 띄울 곳이 없어 삭제·덮어쓰기를 **막고** "터미널에서 진행해 주세요"라고 답합니다. 고장이 아닙니다 |
 
 ## 막혔을 때
 

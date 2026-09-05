@@ -123,6 +123,8 @@ class AgentPool:
             add_dirs=[str(KIT_ROOT), str(self.workspace)],
             resume=self._session_id,
             permission_mode="bypassPermissions",
+            # .claude/hooks/guard.py 가 "슬랙에서 부른 작업"임을 알아, 삭제·덮어쓰기를 확인 창 대신 차단한다.
+            env={"WD_CHANNEL": "slack"},
             # 이 폴더의 .claude/ 를 읽는다. 수강생이 만든 직원이 여기 있다.
             setting_sources=["project"],
             load_timeout_ms=int(os.environ.get("LOAD_TIMEOUT_MS", "120000")),
