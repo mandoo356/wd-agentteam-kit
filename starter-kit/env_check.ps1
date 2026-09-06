@@ -329,6 +329,11 @@ print(" ".join(m + "=" + ("O" if u.find_spec(m) else "X") for m in mods))
 }
 
 function Check-Folders {
+    # 빈 폴더는 ZIP·깃허브에 실리지 않는다. 폴더는 없으면 그냥 만들어 주고, 파일 두 개만 진짜로 본다.
+    foreach ($d in @('.claude\agents', '.claude\skills', 'workspace\inbox', 'workspace\memory', 'workspace\결과물')) {
+        $dp = Join-Path $KIT $d
+        if (-not (Test-Path $dp)) { try { $null = New-Item -ItemType Directory -Path $dp -Force } catch {} }
+    }
     $need = @('.claude\agents', '.claude\skills', 'workspace\inbox', 'workspace\memory', 'slack-server\server.py', '점검.py')
     $missing = @($need | Where-Object { -not (Test-Path (Join-Path $KIT $_)) })
     $d = "정상 — $KIT"; if ($missing.Count) { $d = '없음: ' + ($missing -join ', ') + ' — 스타터킷 압축을 다시 푸세요' }

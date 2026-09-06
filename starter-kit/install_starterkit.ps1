@@ -153,6 +153,11 @@ if (Test-Path -LiteralPath $marker) {
         Stop-WithMessage '복사가 끝났지만 환경점검.bat을 찾지 못했습니다. 원본 ZIP을 다시 받으세요.'
     }
 
+    # ZIP 은 빈 폴더를 담지 못한다 — 직원·스킬·inbox·memory 자리는 여기서 다시 판다 (환경점검 '스타터킷 폴더 구조' 항목)
+    foreach ($d in @('.claude\agents', '.claude\skills', 'workspace\inbox', 'workspace\memory', 'workspace\결과물', 'slack-server\logs')) {
+        $null = New-Item -ItemType Directory -Path (Join-Path $targetKit $d) -Force
+    }
+
     $installedFiles = Get-ChildItem -LiteralPath $targetKit -File -Force -Recurse
     $installedBytes = ($installedFiles | Measure-Object Length -Sum).Sum
     Write-Host '  ✅ 스타터킷 복사 성공' -ForegroundColor Green
