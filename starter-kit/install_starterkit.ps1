@@ -8,6 +8,7 @@
   - 이동을 느리게 하는 node_modules 및 재생성 파일은 복사하지 않는다.
   - 실제 비밀키와 로그인 상태는 복사하지 않는다.
   - 기존 설치가 있으면 덮어쓰지 않는다.
+  - 끝나면 묻지 않고 환경점검(env_check.ps1)으로 넘어간다 — 프로그램·파이썬 3.14·꾸러미·슬랙 열쇠까지 자동.
 #>
 [CmdletBinding()]
 param(
@@ -24,6 +25,8 @@ try {
 } catch {}
 
 try { $Host.UI.RawUI.WindowTitle = '위드드림 AI 에이전트팀 — 폴더 생성 및 설치' } catch {}
+# 파워셸 창에서 claude 한 단어로 부를 수 있게 사용자 범위 실행 정책을 풀어 둔다 (회사 정책이면 조용히 실패)
+try { if ((Get-ExecutionPolicy -Scope CurrentUser) -notin 'RemoteSigned','Unrestricted','Bypass') { Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop } } catch {}
 
 $sourceKit = Split-Path -Parent $MyInvocation.MyCommand.Path
 $targetRoot = [IO.Path]::GetFullPath($InstallRoot)
@@ -177,18 +180,16 @@ Write-Info "스타터킷: $targetKit"
 Write-Info "기록: $logFile"
 Write-Info "내 자료: $(Join-Path $targetRoot 'MyData') — 제안서 3·블로그 3·로고 1 을 수업 전에 넣어 두세요"
 Write-Host ''
-Write-Host '  node_modules는 이동 속도와 PC 호환성 문제 때문에 제외했습니다.' -ForegroundColor Yellow
-Write-Host '  환경점검에서 안내하는 npm 설치를 대상 PC에서 진행하세요.' -ForegroundColor Yellow
+Write-Host '  node_modules는 이동 속도와 PC 호환성 문제 때문에 제외했습니다 (모듈 5에서 npm install).' -ForegroundColor Yellow
 
 if (-not $NoOpen) {
     try { Start-Process explorer.exe -ArgumentList "`"$targetRoot`"" } catch {}
 }
 
+# 2026-09-07: 묻지 않고 바로 환경점검으로 넘어간다. 프로그램 설치·파이썬 3.14·꾸러미·슬랙 열쇠까지 거기서 끝낸다.
 if (-not $SkipEnvironmentCheck) {
-    $answer = Read-Host '  이어서 환경점검을 실행할까요? [Y/n]'
-    if ([string]::IsNullOrWhiteSpace($answer) -or $answer.Trim().ToLower().StartsWith('y')) {
-        Start-Process -FilePath $marker -WorkingDirectory $targetKit
-    }
+    Write-Step '이어서 환경점검·자동 설치를 시작합니다 (묻지 않습니다)'
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetKit 'env_check.ps1') | Out-Host
 }
 
 Write-Host ''

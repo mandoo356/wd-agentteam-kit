@@ -8,7 +8,8 @@
 #    1) 깃허브에서 스타터킷(약 3MB, node_modules·비밀키 없음)을 받는다
 #    2) C:\Agent\01_KIT\starter-kit 에 표준 설치한다 (install_starterkit.ps1)
 #       — 같이 만들어지는 C:\Agent\MyData\ 에 수강생이 제안서·블로그·로고를 미리 넣는다
-#    3) 환경점검(env_check.ps1)을 이어서 돌린다 — Node·Git·Claude Code 등은 여기서 명령어로 설치
+#    3) 환경점검(env_check.ps1)을 이어서 돌린다 — Node·Git·Claude Code 는 없으면 설치, Python 은 무조건 3.14,
+#       꾸러미 설치·확인, 슬랙 열쇠 3개 입력·확인, 서버 첫 기동까지 묻지 않고 진행 (2026-09-07)
 #
 #  테스트·강사용 환경변수 (선택)
 #    $env:WD_KIT_ZIP      = 'C:\path\kit.zip'   깃허브 대신 로컬 ZIP 사용
@@ -29,6 +30,8 @@ try {
     [Console]::InputEncoding  = [Text.Encoding]::UTF8
 } catch {}
 try { $Host.UI.RawUI.WindowTitle = '위드드림 AI 에이전트팀 — 한 줄 설치' } catch {}
+# 파워셸에서 claude 한 단어로 부를 수 있게 사용자 범위 실행 정책을 풀어 둔다 (회사 정책이면 조용히 실패)
+try { if ((Get-ExecutionPolicy -Scope CurrentUser) -notin 'RemoteSigned','Unrestricted','Bypass') { Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop } } catch {}
 
 $Repo   = 'mandoo356/wd-agentteam-kit'
 $Branch = 'main'
@@ -49,7 +52,7 @@ function Fail([string]$t) {
 }
 
 # 아래 두 스크립트는 파일로 실행해야 하므로, 실행정책과 무관하게 돌도록 자식 powershell 로 띄운다.
-# (같은 콘솔을 쓰므로 Y/n 질문·로그인 안내가 그대로 보인다)
+# (같은 콘솔을 쓰므로 로그인 안내·열쇠 입력이 그대로 보인다)
 function Run-Script([string]$Path, [string[]]$ScriptArgs) {
     $psExe = Join-Path $PSHOME 'powershell.exe'
     if (-not (Test-Path -LiteralPath $psExe)) { $psExe = 'powershell.exe' }
@@ -123,14 +126,14 @@ $elapsed = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
 Write-Host ''
 Write-Host "  ✅ 스타터킷 설치 완료 ($elapsed 초)" -ForegroundColor Green
 Info "위치: $Kit"
-Info "다음: 환경점검 → 카드 P0 부터"
+Info "다음: 환경점검이 자동으로 이어집니다 → 끝나면 새 창에서 claude"
 Info "내 자료: $Root\MyData 에 제안서 3·블로그 3·로고 1 을 수업 전에 넣어 두세요"
 
 # ── 6. 환경점검 이어서 ───────────────────────────────────────
 if ($env:WD_NO_ENVCHECK) {
     Info '환경점검은 건너뜁니다 (WD_NO_ENVCHECK).'
 } else {
-    Step '환경점검 시작 — Node·Git·Claude Code 가 없으면 명령어로 설치합니다 (Y 만 누르세요)'
+    Step '환경점검 시작 — 프로그램·파이썬 3.14·꾸러미를 묻지 않고 설치합니다. 사람이 할 일은 로그인과 슬랙 열쇠 붙여넣기뿐'
     $null = Run-Script (Join-Path $Kit 'env_check.ps1') @()
 }
 

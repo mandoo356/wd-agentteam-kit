@@ -125,8 +125,13 @@ class AgentPool:
             permission_mode="bypassPermissions",
             # .claude/hooks/guard.py 가 "슬랙에서 부른 작업"임을 알아, 삭제·덮어쓰기를 확인 창 대신 차단한다.
             env={"WD_CHANNEL": "slack"},
-            # 이 폴더의 .claude/ 를 읽는다. 수강생이 만든 직원이 여기 있다.
-            setting_sources=["project"],
+            # "user" + "project" 둘 다 읽는다 (2026-09-07 수정).
+            #   project — 이 폴더의 .claude/ (수강생이 만든 직원·스킬·안전장치)
+            #   user    — 내 계정 설정(~/.claude). 구글 캘린더·지메일·드라이브 커넥터와
+            #             노트북에서 이미 로그인해 둔 연결이 여기 있다.
+            # 예전엔 project 만 읽어서, 노트북에서는 되는 구글·네이버 연결이 슬랙으로 부르면
+            # "다시 로그인하라"고 나왔다. 직원이 연결을 이어받지 못한 원인이 이 한 줄이었다.
+            setting_sources=["user", "project"],
             load_timeout_ms=int(os.environ.get("LOAD_TIMEOUT_MS", "120000")),
             # 기본 1MB 로는 이미지를 읽을 때 넘친다.
             max_buffer_size=int(os.environ.get("MAX_BUFFER_SIZE", str(16 * 1024 * 1024))),

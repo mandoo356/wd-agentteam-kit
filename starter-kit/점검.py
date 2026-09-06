@@ -161,7 +161,9 @@ def module_0():
                    node or "설치 안 됨 → nodejs.org 에서 LTS 설치"))
 
     py = f"{sys.version_info.major}.{sys.version_info.minor}"
-    checks.append(("Python 3.11 이상", sys.version_info >= (3, 11), f"현재 {py}"))
+    # 수업 표준은 3.14 (환경점검이 무조건 설치). 다른 버전으로 이 파일을 돌리면 여기서 알려준다.
+    checks.append(("Python 3.14 (수업 표준)", sys.version_info[:2] == (3, 14),
+                   f"현재 {py}" + ("" if sys.version_info[:2] == (3, 14) else " → 환경점검.bat 을 실행하면 3.14 가 깔리고 py 가 3.14 로 고정됩니다")))
 
     git = run(["git", "--version"])
     checks.append(("Git", git is not None, git or "설치 안 됨 → git-scm.com"))
@@ -193,7 +195,10 @@ def module_0():
                    ("없는 파일: " + ", ".join(lost) if lost else "settings.json 이 깨졌습니다 → 스타터킷 원본에서 다시 복사")))
     launcher = shutil.which("py")
     checks.append(("py 실행기 (안전장치가 py -3 로 돈다)", launcher is not None,
-                   launcher or "py 가 없습니다 → Python 설치 시 'py launcher' 포함으로 재설치"))
+                   launcher or "py 가 없습니다 → 환경점검.bat 을 다시 실행 (py launcher 포함 설치)"))
+    pinned = os.environ.get("PY_PYTHON3", "") == "3.14" or sys.version_info[:2] == (3, 14)
+    checks.append(("py 가 3.14 를 가리킨다 (PY_PYTHON3)", pinned,
+                   "정상" if pinned else "환경점검.bat 을 다시 실행하면 고정됩니다. 새 창을 열어야 적용됩니다"))
 
     checks.append(("한글 경로에서 실행 중", True, str(ROOT)))
     return checks
@@ -424,7 +429,7 @@ def module_4():
     log = srv / "logs" / "server.log"
     started = log.is_file() and "running" in log.read_text(encoding="utf-8", errors="ignore").lower()
     checks.append(("서버가 한 번 이상 정상 기동했다", started,
-                   "정상" if started else "npm 아니고 py -3 server.py 로 켜야 합니다"))
+                   "정상" if started else "slack-server 폴더에서 py -3 server.py (환경점검이 한 번 켜 봅니다)"))
     return checks
 
 

@@ -1,11 +1,17 @@
 ﻿<#
-  env_check.ps1 — 「에이전트팀 만들기 과정」 출발선 자동 점검
+  env_check.ps1 — 「에이전트팀 만들기 과정」 출발선 자동 점검 + 자동 설치
 
-  무엇을 하나
-    1) 필요한 프로그램(Node·Python·Git·Claude Code…)이 깔렸는지, 버전이 맞는지 본다
-    2) 빠진 것은 winget / npm / pip 으로 자동 설치한다 (묻고 진행)
-    3) 로그인이 필요한 것(Claude Code·슬랙 열쇠·Google Flow·네이버)은 그 화면을 바로 띄운다
-    4) 결과 체크리스트를 검은 창과 HTML(환경점검_결과.html)로 보여준다
+  무엇을 하나 (2026-09-07 개정 — "묻지 않고 설치한다")
+    0) 파워셸 스크립트 실행을 허용한다 → 어느 창에서든 claude 한 단어로 부를 수 있다
+    1) Node.js · Git · Claude Code 가 없으면 winget 으로 그 자리에서 설치한다 (묻지 않음)
+    2) Python 은 있어도 무조건 3.14 를 설치한다. 낮은 버전이 깔려 있어도 그 자리에서 올라간다.
+       py 실행기의 기본을 3.14 로 고정한다 (PY_PYTHON / PY_PYTHON3)
+    3) 파이썬 꾸러미(slack-bolt·slack-sdk·aiohttp·python-dotenv·claude-agent-sdk·playwright)를
+       3.14 에 설치하고, 실제로 불러와지는지 확인한다
+    4) Claude Code 로그인 창을 띄운다 (로그인은 본인이 직접)
+    5) 슬랙 열쇠 3개(xoxb- · xapp- · 멤버 ID)를 붙여넣게 하고 .env 에 BOM 없이 저장한 뒤
+       실제로 슬랙에 통하는지 확인하고, 서버를 한 번 켜서 "준비 완료" 까지 본다
+    6) 결과 체크리스트를 검은 창과 HTML(환경점검_결과.html)로 보여준다
 
   실행
     환경점검.bat 더블클릭  ← 이게 전부입니다
@@ -14,19 +20,25 @@
   옵션 (강사·테스트용)
     -SkipInstall      자동 설치 안 함
     -SkipLogin        로그인 창 안 띄움
+    -SkipSlack        슬랙 열쇠 입력·확인 건너뜀
+    -NoServerTest     서버 첫 기동 시험 안 함
+    -OptionalLogins   Google Flow·네이버 로그인 창도 띄움 (기본은 안 띄움 — 수업 중 카드로 진행)
     -NoBrowser        HTML·안내 페이지 안 열음
     -NoPause          끝나고 Enter 대기 안 함
-    -Yes              모든 질문에 Y
+    -Yes              (호환용) 남아 있는 Enter 대기를 건너뜀
     -PretendMissing   테스트용 — 특정 항목을 "없는 것"으로 가정
                       예) -PretendMissing node,git,claude-login
 
-  🔒 이 파일은 .env 의 열쇠 값을 절대 읽어 화면에 찍지 않습니다. 키 이름과 모양만 봅니다.
+  🔒 이 파일은 .env 의 열쇠 값을 화면에 찍지 않습니다. 붙여넣을 때도 별표(*)로 가립니다.
   🔒 로그인은 항상 사람이 직접 합니다. 비밀번호를 대신 입력하지 않습니다.
 #>
 [CmdletBinding()]
 param(
     [switch]$SkipInstall,
     [switch]$SkipLogin,
+    [switch]$SkipSlack,
+    [switch]$NoServerTest,
+    [switch]$OptionalLogins,
     [switch]$NoBrowser,
     [switch]$NoPause,
     [switch]$Yes,
@@ -101,6 +113,17 @@ function Invoke-Cmd {
     }
 }
 
+function Run-Live {
+    # 설치처럼 오래 걸리는 명령은 화면에 그대로 흘려보낸다 (진행 상황이 보여야 기다린다).
+    param([string]$Line, [int]$TimeoutSec = 900)
+    try {
+        $p = Start-Process -FilePath $env:ComSpec -ArgumentList "/d /s /c `"$Line`"" -NoNewWindow -PassThru
+        $null = $p.Handle
+        if (-not $p.WaitForExit($TimeoutSec * 1000)) { try { $p.Kill() } catch {}; return -2 }
+        return $p.ExitCode
+    } catch { Write-Warn "실행 실패: $_"; return -1 }
+}
+
 function First-Line([string]$s) { if (-not $s) { return '' }; return ($s -split "`r?`n")[0].Trim() }
 
 function Get-Ver([string]$text) {
@@ -120,7 +143,8 @@ function Has-Cmd([string]$name) {
 function Refresh-Path {
     $m = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $u = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $env:Path = "$m;$u"
+    $extra = @("$env:USERPROFILE\.local\bin", "$env:APPDATA\npm", "$env:LOCALAPPDATA\Programs\Python\Launcher")
+    $env:Path = (@($m, $u) + $extra) -join ';'
 }
 
 function Open-Url([string]$url) {
@@ -197,25 +221,27 @@ function Check-Npm {
 }
 
 function Check-Python {
-    $r = Invoke-Cmd 'py -3 -V'
-    $launcher = 'py -3'
-    if (-not $r.ok -or $r.out -notmatch 'Python') { $r = Invoke-Cmd 'python -V'; $launcher = 'python' }
-    if (-not $r.ok -or $r.out -notmatch 'Python') {
-        return (Set-Result 'python' 'Python 3.11 이상' '필수' $false '설치 안 됨 (또는 PATH 미체크)' '설치 시 "Add python.exe to PATH" 체크' 'https://www.python.org/downloads/windows/')
+    # 수업 표준은 Python 3.14 (py -3.14). 다른 버전이 같이 깔려 있어도 상관없다 — 우리는 3.14 만 쓴다.
+    $r = Invoke-Cmd 'py -3.14 -V'
+    if ($r.ok -and $r.out -match 'Python 3\.14') {
+        $script:PY = 'py -3.14'
+        return (Set-Result 'python' 'Python 3.14 (수업 표준)' '필수' $true "$(First-Line $r.out) (py -3.14)")
     }
-    $v = Get-Ver $r.out
-    $ok = ($v -ne $null -and (($v.Major -gt 3) -or ($v.Major -eq 3 -and $v.Minor -ge 11)))
-    $d = "$(First-Line $r.out) ($launcher)"
-    if (-not $ok) { $d += ' → 3.11 이상 필요' }
-    # py -3 와 python 이 다른 버전을 가리키면 알려만 준다 (수업은 py -3 기준)
-    if ($launcher -eq 'py -3') {
-        $r2 = Invoke-Cmd 'python -V'
-        if ($r2.ok -and $r2.out -match 'Python' -and (First-Line $r2.out) -ne (First-Line $r.out)) {
-            $d += " / 참고: 'python' 은 $(First-Line $r2.out) — 수업은 py -3 로 통일"
+    $exe = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python314\python.exe'
+    if (Test-Path $exe) {
+        $r = Invoke-Cmd "`"$exe`" -V"
+        if ($r.ok -and $r.out -match 'Python 3\.14') {
+            $script:PY = "`"$exe`""
+            return (Set-Result 'python' 'Python 3.14 (수업 표준)' '필수' $true "$(First-Line $r.out) — py 실행기 없이 직접 경로로 씁니다")
         }
     }
-    $script:PY = $launcher
-    Set-Result 'python' 'Python 3.11 이상' '필수' $ok $d '설치 시 "Add python.exe to PATH" 체크' 'https://www.python.org/downloads/windows/'
+    $script:PY = $null
+    $d = '설치 안 됨'
+    foreach ($probe in 'py -3 -V', 'python -V') {
+        $r2 = Invoke-Cmd $probe
+        if ($r2.ok -and $r2.out -match 'Python') { $d = "$(First-Line $r2.out) 만 있음 → 3.14 를 새로 깝니다"; break }
+    }
+    Set-Result 'python' 'Python 3.14 (수업 표준)' '필수' $false $d 'winget install --exact --id Python.Python.3.14' 'https://www.python.org/downloads/windows/'
 }
 
 function Check-Pip {
@@ -234,16 +260,19 @@ function Check-Git {
 }
 
 function Check-Claude {
+    Refresh-Path
     $exe = Has-Cmd 'claude'
+    if (-not $exe) { $exe = Has-Cmd 'claude.exe' }
     if (-not $exe) { $exe = Has-Cmd 'claude.cmd' }
+    if (-not $exe) {
+        foreach ($c in @("$env:USERPROFILE\.local\bin\claude.exe", "$env:APPDATA\npm\claude.cmd")) { if (Test-Path $c) { $exe = $c } }
+    }
     if ($exe) {
-        $r = Invoke-Cmd 'claude --version' 40
+        $r = Invoke-Cmd "`"$exe`" --version" 40
         $d = First-Line $r.out; if (-not $d) { $d = $exe }
         return (Set-Result 'claude' 'Claude Code 설치' '필수' $true $d)
     }
-    $codex = Has-Cmd 'codex'
-    if ($codex) { return (Set-Result 'claude' 'Claude Code 설치' '필수' $true "codex 로 대체 확인 ($codex) — 수업은 Claude Code 기준") }
-    Set-Result 'claude' 'Claude Code 설치' '필수' $false '설치 안 됨' 'npm install -g @anthropic-ai/claude-code' 'https://docs.claude.com/en/docs/claude-code/setup'
+    Set-Result 'claude' 'Claude Code 설치' '필수' $false '설치 안 됨' 'winget install --exact --id Anthropic.ClaudeCode' 'https://code.claude.com/docs/en/setup'
 }
 
 function Check-ClaudeLogin([switch]$Quiet) {
@@ -294,9 +323,9 @@ print(" ".join(m + "=" + ("O" if u.find_spec(m) else "X") for m in mods))
         return
     }
     $d = '5개 모두 설치됨'; if ($missing.Count) { $d = '빠짐: ' + ($missing -join ', ') }
-    Set-Result 'pypkg' '파이썬 꾸러미 5개 (slack-bolt·slack-sdk·aiohttp·python-dotenv·claude-agent-sdk)' '필수' ($missing.Count -eq 0) $d "py -3 -m pip install -r slack-server\requirements.txt"
+    Set-Result 'pypkg' '파이썬 꾸러미 5개 (slack-bolt·slack-sdk·aiohttp·python-dotenv·claude-agent-sdk)' '필수' ($missing.Count -eq 0) $d "py -3.14 -m pip install -r slack-server\requirements.txt"
     $pd = 'pip install playwright'; if ($have['playwright']) { $pd = '설치됨' }
-    Set-Result 'playwright' 'playwright 패키지 (블로그·이미지 스킬용)' '선택' ([bool]$have['playwright']) $pd 'py -3 -m pip install playwright'
+    Set-Result 'playwright' 'playwright 패키지 (블로그·이미지 스킬용)' '선택' ([bool]$have['playwright']) $pd 'py -3.14 -m pip install playwright'
 }
 
 function Check-Folders {
@@ -326,13 +355,13 @@ function Check-MyData {
 function Check-SlackEnv {
     # 🔒 값은 절대 화면에 찍지 않는다. 키 이름과 앞머리(xoxb-/xapp-)만 본다.
     $env_ = Join-Path $KIT 'slack-server\.env'
-    $fix = '04_슬랙앱_안내문 대로 앱을 만들고 .env 에 열쇠 2개를 넣습니다 (모듈 4 전까지)'
+    $fix = '교안 2~3쪽대로 열쇠 3개를 받아 두고 환경점검.bat 을 다시 실행해 붙여넣습니다'
     $url = 'https://api.slack.com/apps'
     if (-not (Test-Path $env_)) {
         $stray = @(Get-ChildItem (Join-Path $KIT 'slack-server') -Filter '.env.*' -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne '.env.example' })
         $d = '.env 파일이 아직 없습니다'
         if ($stray.Count) { $d = ".env 대신 $($stray[0].Name) 로 저장돼 있습니다 — 확장자를 지우세요" }
-        return (Set-Result 'slack' '슬랙 열쇠 2개 (.env) — 모듈 4 전까지' '필수' $false $d $fix $url)
+        return (Set-Result 'slack' '슬랙 열쇠 3개 (.env — 봇·앱·멤버 ID)' '필수' $false $d $fix $url)
     }
     $vals = @{}
     foreach ($line in (Get-Content $env_ -Encoding UTF8 -ErrorAction SilentlyContinue)) {
@@ -353,8 +382,11 @@ function Check-SlackEnv {
             if ($v.StartsWith($other)) { $problems += "$key 자리에 $other 가 들어갔습니다 (둘이 바뀜)" } else { $problems += "$key 는 $head 로 시작해야 합니다" }
         }
     }
-    $d = '열쇠 2개 모양 정상 (값은 확인하지 않습니다)'; if ($problems.Count) { $d = $problems -join ' / ' }
-    Set-Result 'slack' '슬랙 열쇠 2개 (.env) — 모듈 4 전까지' '필수' ($problems.Count -eq 0) $d $fix $url
+    $own = ''; if ($vals.ContainsKey('OWNER_USER_ID')) { $own = $vals['OWNER_USER_ID'].Trim().Trim('"').Trim("'") }
+    if (-not $own) { $problems += 'OWNER_USER_ID(내 멤버 ID) 비어 있음' }
+    elseif ($own -notmatch '^[UW][A-Z0-9]{8,}$') { $problems += 'OWNER_USER_ID 는 U 로 시작하는 멤버 ID 여야 합니다' }
+    $d = '열쇠 3개 모양 정상 (값은 확인하지 않습니다)'; if ($problems.Count) { $d = $problems -join ' / ' }
+    Set-Result 'slack' '슬랙 열쇠 3개 (.env — 봇·앱·멤버 ID)' '필수' ($problems.Count -eq 0) $d $fix $url
 }
 
 function Check-VSCode {
@@ -375,62 +407,113 @@ function Check-FlowLogin {
     $prof = Join-Path $USERHOME '.claude\.image-flow-profile'
     $ok = (Test-Path $prof) -and (@(Get-ChildItem $prof -Force -ErrorAction SilentlyContinue).Count -gt 0)
     $d = '아직 로그인 안 함 (Gemini 구독 계정 필요, 세션 약 8시간)'; if ($ok) { $d = "로그인 기록 있음 — $prof" }
-    Set-Result 'flow-login' 'Google Flow 로그인 (이미지 스킬)' '선택' $ok $d 'py -3 flow-image-JJ\scripts\flow_login.py' 'https://labs.google/fx/tools/flow'
+    Set-Result 'flow-login' 'Google Flow 로그인 (이미지 스킬)' '선택' $ok $d 'py -3.14 flow-image-JJ\scripts\flow_login.py' 'https://labs.google/fx/tools/flow'
 }
 
 function Check-NaverLogin {
     $state = Join-Path $KIT 'naver-blog\.naver-state.json'
     $ok = Test-Path $state
     $d = '아직 로그인 안 함'; if ($ok) { $d = '세션 파일 있음 (.naver-state.json)' }
-    Set-Result 'naver-login' '네이버 블로그 로그인 (블로그 스킬)' '선택' $ok $d 'py -3 naver-blog\naver_draft.py login --blog-id 내아이디' 'https://blog.naver.com/'
+    Set-Result 'naver-login' '네이버 블로그 로그인 (블로그 스킬)' '선택' $ok $d 'py -3.14 naver-blog\naver_draft.py login --blog-id 내아이디' 'https://blog.naver.com/'
 }
 
-# ── 4. 고치기 (설치·로그인) ───────────────────────────────────
-function Install-WithWinget([string]$id, [string]$label, [string]$override = '') {
-    Write-Info "winget 으로 $label 설치 중… (몇 분 걸립니다)"
-    $wargs = @('install', '--exact', '--id', $id, '--accept-package-agreements', '--accept-source-agreements', '--silent')
+# ── 4. 고치기 (설치·로그인) — 2026-09-07: 묻지 않고 바로 한다 ──
+function Fix-ExecutionPolicy {
+    # 파워셸이 .ps1 실행을 막아 두면 파워셸 창에서 `claude` 가 "이 시스템에서 스크립트를 실행할 수 없습니다"로 죽는다.
+    # (npm 으로 깔린 claude 는 파워셸에서 claude.ps1 을 먼저 집기 때문) 그래서 사용자 범위로 한 번 풀어 둔다.
+    $name = '파워셸 스크립트 실행 허용 (어느 창에서든 claude 한 단어)'
+    try {
+        $cur = Get-ExecutionPolicy -Scope CurrentUser
+        if ($cur -notin 'RemoteSigned', 'Unrestricted', 'Bypass') {
+            Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop
+        }
+        $eff = Get-ExecutionPolicy
+        $ok = ($eff -in 'RemoteSigned', 'Unrestricted', 'Bypass')
+        $d = "적용됨 (CurrentUser=RemoteSigned, 실제 적용=$eff)"
+        if (-not $ok) { $d = "회사 정책(그룹 정책)이 $eff 로 고정 — 파워셸 대신 CMD 창을 쓰면 그대로 됩니다" }
+        Set-Result 'execpolicy' $name '기본' $ok $d
+    } catch {
+        Set-Result 'execpolicy' $name '기본' $false "바꾸지 못함 — CMD 창에서는 그대로 됩니다 ($($_.Exception.Message))"
+    }
+}
+
+function Install-WithWinget([string]$id, [string]$label, [string]$override = '', [switch]$Force) {
+    Write-Info "winget 으로 $label 설치 중… (몇 분 걸립니다. 이 창을 닫지 마세요)"
+    $wargs = @('install', '--exact', '--id', $id, '--accept-package-agreements', '--accept-source-agreements', '--silent', '--disable-interactivity')
+    if ($Force) { $wargs += '--force' }
     if ($override) { $wargs += @('--override', $override) }
-    try { & winget @wargs } catch { Write-Warn "winget 실패: $_" }
+    try { & winget @wargs | Out-Host } catch { Write-Warn "winget 실패: $_" }
     Refresh-Path
 }
 
 function Fix-Programs {
     $todo = @()
-    if (-not (Is-Ok 'node'))   { $todo += @{ id = 'OpenJS.NodeJS.LTS';  label = 'Node.js LTS'; ov = '' } }
-    if (-not (Is-Ok 'python')) { $todo += @{ id = 'Python.Python.3.13'; label = 'Python 3.13'; ov = '/quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1 Include_pip=1' } }
-    if (-not (Is-Ok 'git'))    { $todo += @{ id = 'Git.Git';            label = 'Git';         ov = '' } }
+    if (-not (Is-Ok 'node')) { $todo += @{ id = 'OpenJS.NodeJS.LTS'; label = 'Node.js LTS'; ov = '' } }
+    if (-not (Is-Ok 'git'))  { $todo += @{ id = 'Git.Git';           label = 'Git';         ov = '' } }
     if ($todo.Count -eq 0) { return }
-
-    Write-Step "빠진 프로그램 $($todo.Count)개: $(($todo | ForEach-Object { $_.label }) -join ', ')"
-    $winget = Has-Cmd 'winget'
+    Write-Step "빠진 프로그램 $($todo.Count)개를 지금 설치합니다: $(($todo | ForEach-Object { $_.label }) -join ', ')"
     if ($SkipInstall) { Write-Info '(-SkipInstall) 자동 설치 생략'; return }
-    if ($winget -and (Ask-YesNo '지금 자동으로 설치할까요? (winget 사용, 몇 분 소요)')) {
-        foreach ($t in $todo) { Install-WithWinget $t.id $t.label $t.ov }
-        Write-Info '설치 후 다시 확인합니다'
-        if (-not (Is-Ok 'node'))   { Check-Node | Out-Null; Check-Npm | Out-Null }
-        if (-not (Is-Ok 'python')) { Check-Python | Out-Null; Check-Pip | Out-Null }
-        if (-not (Is-Ok 'git'))    { Check-Git | Out-Null }
-    } else {
-        if (-not $winget) { Write-Warn 'winget 이 없어 자동 설치가 안 됩니다. 다운로드 페이지를 엽니다.' }
-        foreach ($t in $todo) {
-            $r = $null
-            switch ($t.label) { 'Node.js LTS' { $r = Get-Result 'node' } 'Python 3.13' { $r = Get-Result 'python' } 'Git' { $r = Get-Result 'git' } }
-            if ($r -and $r.Url) { Open-Url $r.Url }
-        }
-        Write-Info '설치가 끝나면 이 프로그램을 다시 실행하세요 (검은 창을 새로 여는 효과가 있습니다).'
+    if (-not (Has-Cmd 'winget')) {
+        Write-Warn 'winget 이 없어 자동 설치가 안 됩니다. 다운로드 페이지를 엽니다 — 설치 후 환경점검을 다시 실행하세요.'
+        foreach ($t in $todo) { $r = $null; switch ($t.label) { 'Node.js LTS' { $r = Get-Result 'node' } 'Git' { $r = Get-Result 'git' } }; if ($r -and $r.Url) { Open-Url $r.Url } }
+        return
     }
+    foreach ($t in $todo) { Install-WithWinget $t.id $t.label $t.ov }
+    Write-Info '설치 후 다시 확인합니다'
+    if (-not (Is-Ok 'node')) { Check-Node | Out-Null; Check-Npm | Out-Null }
+    if (-not (Is-Ok 'git'))  { Check-Git | Out-Null }
+}
+
+function Fix-Python {
+    # 대표 결정(2026-09-07): 파이썬은 있어도 무조건 설치한다. 낮은 버전이 깔려 있으면 그 자리에서 3.14 가 올라간다.
+    # 3.14 가 이미 있으면 winget 이 "이미 설치됨"으로 몇 초 만에 끝난다.
+    if ($SkipInstall) { Write-Info '(-SkipInstall) Python 설치 생략'; return }
+    Write-Step 'Python 3.14 설치 — 있어도 다시 확인해서 최신으로 맞춥니다 (묻지 않습니다)'
+    $had314 = (Is-Ok 'python')
+    if (-not (Has-Cmd 'winget')) {
+        if ($had314) { Write-Info 'winget 이 없지만 3.14 가 이미 있어 그대로 씁니다'; return }
+        Write-Warn 'winget 이 없어 자동 설치가 안 됩니다. python.org 를 엽니다 — 설치 첫 화면 맨 아래 "Add python.exe to PATH" 를 켜세요.'
+        Open-Url 'https://www.python.org/downloads/windows/'
+        return
+    }
+    $ov = '/quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1 Include_pip=1 Include_test=0'
+    # 3.14 가 이미 있으면 그대로 두고(수업 중 켜져 있는 파이썬을 제자리에서 갈아끼우면 깨질 수 있다),
+    # 없거나 낮은 버전만 있으면 --force 로 새로 깐다.
+    Install-WithWinget 'Python.Python.3.14' 'Python 3.14' $ov -Force:(-not $had314)
+    # py 실행기의 기본을 3.14 로 고정 — 이후 py / py -3 / 안전장치(hooks) 전부 3.14 로 돈다.
+    foreach ($k in 'PY_PYTHON', 'PY_PYTHON3') {
+        try { [Environment]::SetEnvironmentVariable($k, '3.14', 'User') } catch {}
+        Set-Item -Path "Env:$k" -Value '3.14'
+    }
+    Check-Python | Out-Null
+    Check-Pip | Out-Null
+    if (Is-Ok 'python') { Write-Info 'py 실행기 기본 = 3.14 (PY_PYTHON / PY_PYTHON3). 새 창부터 py -3 도 3.14 입니다.' }
 }
 
 function Fix-Claude {
     if (Is-Ok 'claude') { return }
-    if (-not (Is-Ok 'npm')) { Write-Warn 'npm 이 없어 Claude Code 를 설치할 수 없습니다. Node.js 부터.'; return }
     if ($SkipInstall) { Write-Info '(-SkipInstall) Claude Code 설치 생략'; return }
-    Write-Step 'Claude Code 설치'
-    if (Ask-YesNo 'npm install -g @anthropic-ai/claude-code 를 지금 실행할까요? (약 610MB)') {
-        try { & npm install -g @anthropic-ai/claude-code } catch { Write-Warn "npm 실패: $_" }
+    Write-Step 'Claude Code 설치 (묻지 않습니다)'
+    if (Has-Cmd 'winget') {
+        Install-WithWinget 'Anthropic.ClaudeCode' 'Claude Code'
+        Check-Claude | Out-Null
+        if (Is-Ok 'claude') { return }
+    }
+    Write-Info '공식 설치 스크립트(claude.ai/install.ps1)로 다시 시도합니다'
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-Expression (Invoke-RestMethod -Uri 'https://claude.ai/install.ps1' -UseBasicParsing)
+    } catch { Write-Warn "공식 설치 스크립트 실패: $_" }
+    Refresh-Path
+    Check-Claude | Out-Null
+    if (Is-Ok 'claude') { return }
+    if (Is-Ok 'npm') {
+        Write-Info '마지막으로 npm 으로 설치합니다 (약 610MB)'
+        $null = Run-Live 'npm install -g @anthropic-ai/claude-code' 900
         Refresh-Path
         Check-Claude | Out-Null
     }
+    if (-not (Is-Ok 'claude')) { Write-Warn '자동 설치가 전부 막혔습니다. 회사 보안 정책이면 개인 노트북으로 진행하세요.' }
 }
 
 function Fix-ClaudeLogin {
@@ -448,54 +531,124 @@ function Fix-ClaudeLogin {
         Start-Sleep -Seconds 5
     }
     Write-Host ''
-    if (-not $logged) { Write-Warn '10분 안에 로그인이 확인되지 않았습니다. 로그인 후 다시 실행하세요.' }
+    if (-not $logged) { Write-Warn '10분 안에 로그인이 확인되지 않았습니다. 로그인 후 환경점검을 다시 실행하세요.' }
     Check-ClaudeLogin | Out-Null
 }
 
 function Fix-PyPackages {
-    if ((Is-Ok 'pypkg') -or -not (Is-Ok 'pip')) { return }
+    if (-not $script:PY) { return }
     if ($SkipInstall) { Write-Info '(-SkipInstall) 꾸러미 설치 생략'; return }
     $req = Join-Path $KIT 'slack-server\requirements.txt'
     if (-not (Test-Path $req)) { Write-Warn "requirements.txt 가 없습니다: $req"; return }
-    Write-Step '파이썬 꾸러미 5개 설치'
-    if (Ask-YesNo "$($script:PY) -m pip install -r slack-server\requirements.txt 를 지금 실행할까요?") {
-        $parts = @($script:PY -split ' ')
-        $pyArgs = @(); if ($parts.Count -gt 1) { $pyArgs = @($parts[1..($parts.Count - 1)]) }
-        try { & $parts[0] @pyArgs -m pip install -r $req } catch { Write-Warn "pip 실패: $_" }
+    Write-Step '파이썬 꾸러미 설치 — 매번 확인해서 빠진 것만 채웁니다 (묻지 않습니다)'
+    $null = Run-Live "$($script:PY) -m pip install --disable-pip-version-check -r `"$req`" playwright" 900
+    Check-PyPackages | Out-Null
+    if (-not (Is-Ok 'pypkg')) {
+        Write-Warn '꾸러미가 아직 빠져 있습니다. 한 번 더 시도합니다.'
+        $null = Run-Live "$($script:PY) -m pip install --disable-pip-version-check --upgrade pip" 300
+        $null = Run-Live "$($script:PY) -m pip install --disable-pip-version-check -r `"$req`" playwright" 900
         Check-PyPackages | Out-Null
+    }
+    if (-not (Is-Ok 'pypkg')) { Write-Warn '꾸러미 설치가 끝나지 않았습니다. 인터넷·백신을 확인하고 환경점검을 다시 실행하세요.' }
+}
+
+function Read-Secret([string]$label, [string]$head) {
+    # 값은 별표로 가려서 받는다. 화면 공유 중에도 안전하다.
+    while ($true) {
+        $s = Read-Host "  ? $label — $head 로 시작하는 값을 붙여넣고 Enter (나중에 하려면 s)" -AsSecureString
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
+        try { $v = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        $v = $v.Trim().Trim('"').Trim("'")
+        if ($v.ToLower() -eq 's') { return $null }
+        if (-not $v) { Write-Warn '비어 있습니다. 다시 붙여넣으세요 (붙여넣기 = 마우스 오른쪽 클릭)'; continue }
+        if ($v.StartsWith($head)) { Write-Info "받음: $($v.Substring(0, [Math]::Min(8, $v.Length)))… ($($v.Length)자)"; return $v }
+        $other = 'xapp-'; if ($head -eq 'xapp-') { $other = 'xoxb-' }
+        if ($v.StartsWith($other)) { Write-Warn "$other 로 시작하는 값입니다 — 다른 열쇠를 붙여넣으셨어요. $head 열쇠를 넣어주세요." }
+        else { Write-Warn "$head 로 시작해야 합니다. 앞뒤가 잘렸는지 확인하세요." }
     }
 }
 
 function Fix-Slack {
     if (Is-Ok 'slack') { return }
-    if ($SkipLogin) { Write-Info '(-SkipLogin) 슬랙 설정 생략'; return }
-    Write-Step '슬랙 열쇠 넣기 — 안내문과 .env 를 엽니다'
+    if ($SkipSlack -or $SkipLogin) { Write-Info '(-SkipSlack) 슬랙 열쇠 입력 생략'; return }
     $srv = Join-Path $KIT 'slack-server'
     $envf = Join-Path $srv '.env'
-    $example = Join-Path $srv '.env.example'
-    if (-not (Test-Path $envf) -and (Test-Path $example)) { Copy-Item $example $envf; Write-Info '.env.example 을 복사해 .env 를 만들었습니다' }
-    $guide = Get-ChildItem $COURSE -Filter '04_슬랙앱_안내문*_WD.html' -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $guide) { $guide = Get-ChildItem $COURSE -Filter '04_슬랙앱_안내문*.html' -ErrorAction SilentlyContinue | Select-Object -First 1 }
-    if ($guide) { Open-Url $guide.FullName } else { Write-Info '안내문 HTML 이 근처에 없어 슬랙 앱 페이지만 엽니다' }
-    Open-Url 'https://api.slack.com/apps'
-    if (-not $NoBrowser -and (Test-Path $envf)) { try { Start-Process notepad.exe $envf } catch {} }
-    Write-Info '① 슬랙 워크스페이스는 회사 것 말고 본인 것으로 새로 만듭니다 (slack.com/get-started)'
-    Write-Info '② 안내문대로 앱을 만들어 xoxb- 와 xapp- 열쇠를 받습니다'
-    Write-Info '③ 메모장에 열린 .env 의 SLACK_BOT_TOKEN= / SLACK_APP_TOKEN= 뒤에 붙이고 저장(Ctrl+S)'
-    if ($Yes) { Check-SlackEnv | Out-Null; return }
+    Write-Step '슬랙 열쇠 3개 넣기 — 교안 2~3쪽에서 받아 둔 값을 하나씩 붙여넣습니다'
+    Write-Info '붙여넣기는 마우스 오른쪽 클릭. 값은 별표(*)로 가려지고 .env 파일에만 저장됩니다.'
+    Write-Info '아직 못 받았으면 s 를 치고 Enter — 나중에 환경점검.bat 을 다시 실행하면 이 자리부터 다시 묻습니다.'
+    $bot = Read-Secret '① 봇 토큰 SLACK_BOT_TOKEN' 'xoxb-'
+    if (-not $bot) { Write-Info '슬랙은 나중에. 교안 2~3쪽대로 받아 오세요.'; return }
+    $appT = Read-Secret '② 앱 토큰 SLACK_APP_TOKEN' 'xapp-'
+    if (-not $appT) { Write-Info '슬랙은 나중에.'; return }
+    $owner = ''
     while ($true) {
-        $a = Read-Host '  ⏎ 열쇠를 넣고 저장했으면 Enter, 나중에 하려면 S 를 치고 Enter'
-        if ($a.Trim().ToLower() -eq 's') { Write-Info '슬랙은 모듈 4 전까지만 준비하면 됩니다.'; break }
-        if (Check-SlackEnv) { break }
+        $owner = (Read-Host '  ? ③ 내 멤버 ID OWNER_USER_ID — U 로 시작하는 값 (슬랙 앱 → 내 프로필 → ⋯ 더보기 → 멤버 ID 복사)').Trim().Trim('"').Trim("'")
+        if ($owner -match '^[UW][A-Z0-9]{8,}$') { break }
+        Write-Warn 'U 로 시작하는 9자 이상 영문·숫자여야 합니다 (이메일·이름이 아니라 "멤버 ID 복사" 값)'
     }
+    $body = "# 슬랙 열쇠 — 환경점검이 $([DateTime]::Now.ToString('yyyy-MM-dd HH:mm')) 에 저장. 비밀번호와 같습니다. 남에게 주지 마세요.`n" +
+            "SLACK_BOT_TOKEN=$bot`nSLACK_APP_TOKEN=$appT`nOWNER_USER_ID=$owner`n"
+    try {
+        [IO.File]::WriteAllText($envf, $body, (New-Object System.Text.UTF8Encoding($false)))   # BOM 없이
+        Write-Info ".env 저장됨 (BOM 없음): $envf"
+    } catch { Write-Warn ".env 저장 실패: $_"; return }
+    Check-SlackEnv | Out-Null
+}
+
+function Test-SlackLive {
+    # 열쇠 모양이 맞아도 값이 틀릴 수 있다. 실제로 슬랙에 물어본다 (값은 출력하지 않는다).
+    if (-not (Is-Ok 'slack')) { return }
+    if (-not (Is-Ok 'pypkg') -or -not $script:PY) { Set-Result 'slack-live' '슬랙 열쇠가 실제로 통한다' '필수' $false '파이썬 꾸러미 먼저'; return }
+    $chk = Join-Path $KIT 'slack-server\slack_check.py'
+    if (-not (Test-Path $chk)) { Set-Result 'slack-live' '슬랙 열쇠가 실제로 통한다' '필수' $false 'slack_check.py 가 없습니다 — 스타터킷 다시 설치'; return }
+    Write-Step '슬랙에 실제로 물어봅니다 (열쇠 값은 화면에 나오지 않습니다)'
+    $r = Invoke-Cmd "$($script:PY) `"$chk`"" 60
+    $lines = @($r.out -split "`r?`n" | Where-Object { $_.Trim() })
+    foreach ($l in $lines) { Write-Info $l }
+    $d = ($lines | Select-Object -Last 1); if (-not $d) { $d = '응답 없음' }
+    Set-Result 'slack-live' '슬랙 열쇠가 실제로 통한다' '필수' $r.ok $d '틀린 열쇠를 다시 받아 환경점검.bat 을 다시 실행'
+}
+
+function Test-Server {
+    # 서버를 한 번 켜서 "준비 완료" 까지 보고 끈다. 수강생이 처음 보는 성공 화면이 이것이다.
+    if ($NoServerTest) { return }
+    if (-not (Is-Ok 'slack-live')) { Set-Result 'server' '슬랙 서버 첫 기동 (준비 완료)' '필수' $false '열쇠 확인 먼저'; return }
+    $srv = Join-Path $KIT 'slack-server'
+    $exeLine = Invoke-Cmd "$($script:PY) -c `"import sys;print(sys.executable)`"" 30
+    $pyexe = First-Line $exeLine.out
+    if (-not ($pyexe -and (Test-Path $pyexe))) { Set-Result 'server' '슬랙 서버 첫 기동 (준비 완료)' '필수' $false '파이썬 실행 파일을 찾지 못함'; return }
+    Write-Step '슬랙 서버를 한 번 켜 봅니다 (최대 90초, 끝나면 자동으로 끕니다)'
+    $out = [IO.Path]::GetTempFileName(); $err = [IO.Path]::GetTempFileName()
+    $p = $null; $ok = $false; $d = '90초 안에 "준비 완료" 가 뜨지 않음'
+    try {
+        $p = Start-Process -FilePath $pyexe -ArgumentList '-X', 'utf8', 'server.py' -WorkingDirectory $srv -RedirectStandardOutput $out -RedirectStandardError $err -NoNewWindow -PassThru
+        $null = $p.Handle
+        $deadline = (Get-Date).AddSeconds(90)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 3
+            $txt = ''; try { $txt = [IO.File]::ReadAllText($out, [Text.Encoding]::UTF8) + [IO.File]::ReadAllText($err, [Text.Encoding]::UTF8) } catch {}
+            if ($txt -match '준비 완료') { $ok = $true; $d = ($txt -split "`r?`n" | Where-Object { $_ -match '준비 완료' } | Select-Object -First 1).Trim(); break }
+            if ($txt -match '❌|Error|Traceback') { $d = (($txt -split "`r?`n" | Where-Object { $_ -match '❌|Error' } | Select-Object -First 1)); if (-not $d) { $d = '오류로 종료' }; break }
+            if ($p.HasExited) { $d = "서버가 바로 꺼짐 (종료코드 $($p.ExitCode))"; break }
+            Write-Host -NoNewline '.' -ForegroundColor DarkGray
+        }
+        Write-Host ''
+    } catch { $d = "실행 실패: $_" }
+    finally {
+        if ($p -and -not $p.HasExited) { try { $p.Kill() } catch {} }
+        Remove-Item $out, $err -ErrorAction SilentlyContinue
+    }
+    $agents = @(Get-ChildItem (Join-Path $KIT '.claude\agents') -Filter '*.md' -ErrorAction SilentlyContinue).Count
+    if ($ok -and $agents -eq 0) { $d += ' — 직원은 아직 0명(모듈 1에서 만듭니다)' }
+    Set-Result 'server' '슬랙 서버 첫 기동 (준비 완료)' '필수' $ok $d 'slack-server 폴더에서 py -3 server.py 를 켜고 메시지를 읽으세요'
 }
 
 function Fix-OptionalLogins {
-    if ($SkipLogin) { return }
+    if ($SkipLogin -or -not $OptionalLogins) { return }
     if (-not ((Is-Ok 'python') -and (Is-Ok 'playwright') -and (Is-Ok 'chrome'))) { return }
     if (-not (Is-Ok 'flow-login')) {
         $script_ = Join-Path $KIT 'flow-image-JJ\scripts\flow_login.py'
-        if ((Test-Path $script_) -and (Ask-YesNo 'Google Flow(이미지 스킬) 로그인 창을 지금 띄울까요? (Gemini 구독 계정 필요)' $false)) {
+        if (Test-Path $script_) {
             Open-NewWindow 'Google-Flow-로그인' "$($script:PY) `"$script_`"" (Split-Path $script_)
             Wait-Enter '크롬 창에서 Google 로그인을 마치고 "[OK] 로그인 완료" 가 뜨면'
             Check-FlowLogin | Out-Null
@@ -503,7 +656,7 @@ function Fix-OptionalLogins {
     }
     if (-not (Is-Ok 'naver-login')) {
         $script_ = Join-Path $KIT 'naver-blog\naver_draft.py'
-        if ((Test-Path $script_) -and (Ask-YesNo '네이버 블로그(블로그 스킬) 로그인 창을 지금 띄울까요?' $false)) {
+        if (Test-Path $script_) {
             $bid = Read-Host '  ? 네이버 블로그 아이디 (blog.naver.com/뒤에 오는 것, 비우면 건너뜀)'
             if (-not [string]::IsNullOrWhiteSpace($bid)) {
                 Open-NewWindow 'Naver-Blog-로그인' "$($script:PY) `"$script_`" login --blog-id $($bid.Trim())" (Split-Path $script_)
@@ -607,28 +760,33 @@ td.name{font-weight:600;width:34%}
 # ── 6. 실행 ──────────────────────────────────────────────────
 Write-Host ''
 Write-Host '  ┌──────────────────────────────────────────────────┐' -ForegroundColor Magenta
-Write-Host '  │   에이전트팀 만들기 과정 — 출발선 자동 점검      │' -ForegroundColor Magenta
+Write-Host '  │   에이전트팀 만들기 과정 — 출발선 자동 점검·설치   │' -ForegroundColor Magenta
 Write-Host '  └──────────────────────────────────────────────────┘' -ForegroundColor Magenta
 Write-Info "스타터킷: $KIT"
+Write-Info '이 프로그램은 묻지 않고 설치합니다. 사람이 할 일은 로그인과 슬랙 열쇠 붙여넣기뿐입니다.'
 if ($PretendMissing.Count) { Write-Warn "테스트 모드 — 없는 것으로 가정: $($PretendMissing -join ', ')" }
 
 $script:PY = $null
+
+Write-Step '0/6 준비 — 파워셸 실행 허용'
+Fix-ExecutionPolicy | Out-Null
 
 Write-Step '1/6 기본 확인'
 Check-Internet | Out-Null
 Check-Disk | Out-Null
 
-Write-Step '2/6 프로그램 확인'
+Write-Step '2/6 프로그램 — 없으면 설치, 파이썬은 항상 3.14 로'
 Check-Node | Out-Null
 Check-Npm | Out-Null
-Check-Python | Out-Null
-Check-Pip | Out-Null
 Check-Git | Out-Null
+Fix-Programs
+Check-Python | Out-Null
+Fix-Python
+if (-not $script:PY) { Check-Pip | Out-Null }
 Check-Claude | Out-Null
+Fix-Claude
 Check-VSCode | Out-Null
 Check-Chrome | Out-Null
-Fix-Programs
-Fix-Claude
 
 Write-Step '3/6 Claude Code 로그인'
 Check-ClaudeLogin | Out-Null
@@ -638,13 +796,15 @@ Write-Step '4/6 파이썬 꾸러미'
 Check-PyPackages | Out-Null
 Fix-PyPackages
 
-Write-Step '5/6 스타터킷 · 슬랙'
+Write-Step '5/6 스타터킷 · 슬랙 열쇠 · 서버 첫 기동'
 Check-Folders | Out-Null
 Check-MyData | Out-Null
 Check-SlackEnv | Out-Null
 Fix-Slack
+Test-SlackLive
+Test-Server
 
-Write-Step '6/6 선택 항목 (스킬용 로그인)'
+Write-Step '6/6 선택 항목 (스킬용 로그인 — 수업 중 카드로 진행)'
 Check-FlowLogin | Out-Null
 Check-NaverLogin | Out-Null
 Fix-OptionalLogins
@@ -662,7 +822,7 @@ $reqOk = @($req | Where-Object { $_.Ok }).Count
 $optOk = @($opt | Where-Object { $_.Ok }).Count
 Write-Host '  ─────────────────────────────────────────────────' -ForegroundColor Magenta
 if ($reqOk -eq $req.Count) {
-    Write-Host "  🎉 필수 $reqOk/$($req.Count) 전부 통과 · 선택 $optOk/$($opt.Count) — 출발 준비 완료!" -ForegroundColor Green
+    Write-Host "  🎉 필수 $reqOk/$($req.Count) 전부 통과 · 선택 $optOk/$($opt.Count) — 출발 준비 완료! 창을 새로 열고 claude 를 부르세요." -ForegroundColor Green
 } else {
     Write-Host "  필수 $reqOk/$($req.Count) 통과 · 선택 $optOk/$($opt.Count) — ❌ 표시된 것만 고치고 다시 실행하세요." -ForegroundColor Yellow
 }
