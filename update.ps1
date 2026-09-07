@@ -152,7 +152,10 @@ $cands = @(
 )
 $memDir = Join-Path $env:USERPROFILE '.claude\projects'
 if (Test-Path -LiteralPath $memDir) {
-    $cands += @(Get-ChildItem -LiteralPath $memDir -Recurse -File -Include '*.md' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+    # 클로드가 스스로 적어 둔 기억(memory\*.md)과 CLAUDE.md 만 본다. 대화 기록(.jsonl)은 보지 않는다
+    $cands += @(Get-ChildItem -LiteralPath $memDir -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -eq '.md' -and ($_.Name -eq 'CLAUDE.md' -or $_.DirectoryName -match '\\memory$') } |
+        Select-Object -ExpandProperty FullName)
 }
 $agentsDir = Join-Path $Kit '.claude\agents'
 if (Test-Path -LiteralPath $agentsDir) {
@@ -168,7 +171,9 @@ foreach ($f in $cands) {
 }
 if ($suspects.Count -gt 0) {
     Warn "아래 파일에 강사 이름($instructor)이 들어 있습니다. 내 이름이 맞는지 열어서 고치세요 (지우지는 않았습니다):"
-    foreach ($f in $suspects) { Warn "  $f" }
+    $shown = @($suspects | Select-Object -First 8)
+    foreach ($f in $shown) { Warn "  $f" }
+    if ($suspects.Count -gt $shown.Count) { Warn ("  … 외 {0}개" -f ($suspects.Count - $shown.Count)) }
 } else { Info '없습니다.' }
 $facts = Join-Path $Kit 'workspace\memory\facts.md'
 if (-not (Test-Path -LiteralPath $facts)) {
