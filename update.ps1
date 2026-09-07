@@ -59,14 +59,23 @@ if (-not (Test-Path -LiteralPath (Join-Path $Srv 'server.py'))) {
 # ── 1. 켜져 있는 서버 끄기 ──────────────────────────────────
 Step '켜져 있는 슬랙 서버 끄기'
 $killed = 0
-try {
-    Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
-        $_.Name -match '^python' -and $_.CommandLine -and $_.CommandLine -match 'server\.py'
-    } | ForEach-Object {
-        try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $killed++ } catch {}
-    }
-} catch {}
-if ($killed -gt 0) { Info "서버 $killed 개를 껐습니다. 옛 서버 창은 닫아도 됩니다." } else { Info '켜져 있는 서버가 없습니다.' }
+if ($env:WD_NO_KILL) {
+    Info '서버 끄기는 건너뜁니다 (WD_NO_KILL). 켜져 있으면 그 창에서 Ctrl+C.'
+} else {
+    try {
+        $all = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        $all | Where-Object {
+            $_.Name -match '^python' -and $_.CommandLine -and $_.CommandLine -match 'server\.py'
+        } | ForEach-Object {
+            # 감시기(supervisor)가 띄운 다른 서버(강사 홈서버 등)는 건드리지 않는다 — 수강생 킷의 서버만
+            $ppid = $_.ParentProcessId
+            $par = $all | Where-Object { $_.ProcessId -eq $ppid } | Select-Object -First 1
+            if ($par -and $par.CommandLine -and $par.CommandLine -match 'supervisor|withdream-agent-server') { return }
+            try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $killed++ } catch {}
+        }
+    } catch {}
+    if ($killed -gt 0) { Info "서버 $killed 개를 껐습니다. 옛 서버 창은 닫아도 됩니다." } else { Info '켜져 있는 서버가 없습니다.' }
+}
 
 # ── 2. 받을 파일 ─────────────────────────────────────────────
 #   내가 고치는 파일(personas.py · agent_channels.py · .env · 직원 · 스킬)은 이 목록에 없다.
@@ -87,7 +96,8 @@ $null  = New-Item -ItemType Directory -Path $tmp -Force
 Step '새 엔진 파일 받기'
 $got = @()
 foreach ($rel in $files) {
-    $url = $RawBase + '/' + (($rel -split '/') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
+    $segs = @(($rel -split '/') | ForEach-Object { [uri]::EscapeDataString($_) })
+    $url  = $RawBase + '/' + ($segs -join '/')
     $dst = Join-Path $tmp ($rel -replace '/', '\')
     $null = New-Item -ItemType Directory -Path (Split-Path $dst) -Force
     try {
