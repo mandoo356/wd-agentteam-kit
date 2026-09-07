@@ -26,6 +26,8 @@ from claude_agent_sdk import (
     ResultMessage,
 )
 
+from roster import load_agents, owner_name, describe
+
 log = logging.getLogger("agent.bridge")
 
 # 스타터킷 폴더 (slack-server 의 부모). 여기에 .claude/ 와 workspace/ 가 있다.
@@ -39,7 +41,11 @@ DISCONNECT_TIMEOUT_SEC = 10
 # 대화 이어가기용 세션 ID. 이게 없으면 서버를 껐다 켤 때마다
 # 직원이 하던 일을 통째로 잊는다.
 SESSION_FILE = Path(__file__).resolve().parent / ".agent_session.json"
-SESSION_MAX_AGE_SEC = int(os.environ.get("SESSION_MAX_AGE_SEC", str(24 * 3600)))
+# 3시간. 예전엔 24시간이었는데, 어제 대화(다른 이름·옛 요청)를 오늘까지 끌고 와서
+# "왜 아직도 그 얘기야" 가 됐다. 슬랙에서 "새 대화" 라고 치면 즉시 잊는다 (server.py).
+SESSION_MAX_AGE_SEC = int(os.environ.get("SESSION_MAX_AGE_SEC", str(3 * 3600)))
+# 직원 파일 본문을 프롬프트에 넣을 때 상한 (캐릭터가 살아나되 너무 길지 않게)
+AGENT_BODY_LIMIT = int(os.environ.get("AGENT_BODY_LIMIT", "1400"))
 
 
 class ClaudeError(RuntimeError):
@@ -193,25 +199,82 @@ class AgentPool:
         await self.close()
         return await self._ensure_connected()
 
+    # ---- 프롬프트 재료 --------------------------------------------------
+    @staticmethod
+    def _personas() -> dict:
+        try:
+            from personas import PERSONAS
+            return PERSONAS
+        except Exception as e:  # personas.py 를 고치다 문법이 깨진 경우
+            log.warning("personas.py 를 못 읽었습니다: %s", e)
+            return {}
+
+    def _roster_text(self, agents: dict, personas: dict) -> str:
+        """팀 명단 한 줄씩 — '표시이름 (키): 담당'. 직원 파일이 있는 키만."""
+        keys = list(personas) + [k for k in agents if k not in personas]
+        rows = []
+        for k in keys:
+            if k not in agents:
+                continue  # personas 에만 있고 직원 파일이 없으면 명단에서 뺀다
+            disp = personas.get(k, {}).get("display_name") or agents[k].get("name") or k
+            rows.append(f"  - {disp} ({k}): {describe(agents.get(k)) or '담당 미정'}")
+        return "\n".join(rows)
+
+    def build_prompt(self, agent: str, user_message: str,
+                     speaker_name: str = "") -> str:
+        agents = load_agents(KIT_ROOT)
+        personas = self._personas()
+        disp = personas.get(agent, {}).get("display_name") or agents.get(agent, {}).get("name") or agent
+        boss, _src = owner_name(KIT_ROOT)
+        boss = speaker_name or boss
+        if boss:
+            who = f"{boss} — 이 회사의 대표 본인"
+        else:
+            who = ("이 회사의 대표 본인 (이름은 workspace/memory/facts.md 의 '이름:' 에 있다. "
+                   "없으면 '대표님' 이라고 부른다)")
+        body = (agents.get(agent, {}).get("body") or "").strip()
+        if len(body) > AGENT_BODY_LIMIT:
+            body = body[:AGENT_BODY_LIMIT] + f"\n…(이하 생략 — 전문은 .claude/agents/{agent}.md)"
+        roster = self._roster_text(agents, personas) or "  (직원 파일이 없습니다 — .claude/agents/ 를 확인)"
+
+        parts = [
+            "[슬랙으로 온 요청]",
+            f"말을 거는 사람: {who}. 이 사람을 다른 이름·다른 사람으로 부르지 않는다. "
+            "이름을 정정해 주면 그 이름으로 부르고 facts.md 의 '이름:' 줄에 반영한다.",
+            f"기본 담당: {disp} ({agent})",
+            "",
+            "[우리 팀 명단 — 답할 때 쓰는 이름은 왼쪽 표시 이름 그대로]",
+            roster,
+            "",
+            f"[담당 직원 {disp} 의 정체성 — 이 성격·말투·담당대로 답한다]",
+            body or "(직원 파일 본문 없음)",
+            "",
+            "[일하는 규칙]",
+            f"- 먼저 workspace/memory/facts.md 를 읽고, 자기 inbox(workspace/inbox/{agent}/)에 온 쪽지가 있으면 확인한다.",
+            "- 요청이 기본 담당의 일이 아니면 명단에서 맞는 직원을 고르고 그 직원 이름으로 답한다. "
+            "여러 직원이 얽힌 일이면 관련된 직원이 각자 한 줄씩 말한다 (팀장 혼자 다 말하지 않는다).",
+            "- 파일을 만드는 큰 일이 다른 직원 몫이면 Agent 도구로 그 직원(subagent_type=키)에게 맡기고, "
+            "결과를 그 직원 이름으로 보고한다. 작은 답은 바로 그 직원 이름으로 한다.",
+            "- 산출물은 workspace/결과물/ 에 파일로 저장한다. 다른 직원이 이어받아야 하면 "
+            "workspace/inbox/<상대키>/ 에 쪽지를 남긴다.",
+            "- 모르는 금액·날짜·고객사 이름은 지어내지 않는다.",
+            "",
+            "[답하는 방식 — 지킬 것]",
+            f"- 카톡처럼 한 줄에 한 마디. 모든 줄을 '표시이름: 내용' 형태로 쓴다. 예) {disp}: 착수했어요",
+            "- 표시이름은 위 명단의 이름 그대로. staff2 같은 영어 키나 '직원2' 를 쓰지 않는다.",
+            "- 한 줄 40자 내외, 전체 5줄 이내. 과정 설명·요약·서론 금지. 결론과 사람이 할 일만.",
+            "- 마크다운 강조(**), 불릿, 제목, 코드블록 쓰지 않는다.",
+            "",
+            "---",
+            user_message,
+        ]
+        return "\n".join(parts)
+
     async def query_agent(self, agent: str, user_message: str,
-                          timeout_sec: Optional[int] = None) -> str:
+                          timeout_sec: Optional[int] = None,
+                          speaker_name: str = "") -> str:
         timeout_sec = timeout_sec or QUERY_TIMEOUT_SEC
-        prompt = (
-            f"[슬랙으로 온 요청. 담당 직원: @{agent}]\n"
-            f"{agent} 의 정체성과 규칙대로 처리할 것.\n"
-            f"먼저 workspace/memory/facts.md 를 읽고, 자기 inbox 에 온 쪽지가 있으면 확인한다.\n"
-            f"산출물은 workspace/결과물/ 에 파일로 저장한다.\n"
-            f"다른 직원이 이어받아야 하면 workspace/inbox/<상대>/ 에 쪽지를 남긴다.\n"
-            f"모르는 금액·날짜·고객사 이름은 지어내지 않는다.\n"
-            f"\n"
-            f"[답하는 방식 — 지킬 것]\n"
-            f"- 카톡처럼 한 줄에 한 마디. 각 줄은 '이름: 내용' 형태로 쓴다.\n"
-            f"- 한 줄 40자 내외, 전체 5줄 이내.\n"
-            f"- 과정 설명·요약·서론 금지. 결론과 사람이 할 일만.\n"
-            f"- 마크다운 강조(**), 불릿, 제목, 코드블록 쓰지 않는다.\n"
-            f"\n"
-            f"---\n{user_message}"
-        )
+        prompt = self.build_prompt(agent, user_message, speaker_name)
         async with self._lock:
             try:
                 return await self._do_query(prompt, timeout_sec)
@@ -266,6 +329,15 @@ def get_pool(workspace: Path, cli_path: str) -> AgentPool:
 
 
 async def invoke_agent(agent: str, user_message: str, workspace: Path,
-                       cli_path: str, timeout_sec: Optional[int] = None) -> str:
+                       cli_path: str, timeout_sec: Optional[int] = None,
+                       speaker_name: str = "") -> str:
     pool = get_pool(workspace, cli_path)
-    return await pool.query_agent(agent, user_message, timeout_sec=timeout_sec)
+    return await pool.query_agent(agent, user_message, timeout_sec=timeout_sec,
+                                  speaker_name=speaker_name)
+
+
+async def reset_conversation(workspace: Path, cli_path: str) -> None:
+    """슬랙에서 '새 대화' 라고 하면 — 저장된 대화를 버리고 Claude 를 새로 붙인다."""
+    pool = get_pool(workspace, cli_path)
+    pool.forget_session()
+    await pool.close()

@@ -17,6 +17,15 @@ irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/install.ps
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/install.ps1 | iex"
 ```
 
+## 이미 설치했다면 — 새 판으로 올리기 (2026-09-08)
+
+```powershell
+irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/update.ps1 | iex
+```
+
+엔진 파일(`server.py`·`claude_bridge.py`·`roster.py`·`점검.py`·카드)만 바꾸고, 내가 만든 직원·스킬·`personas.py`·`agent_channels.py`·`.env`·`workspace` 는 그대로 둡니다.
+고치는 것: 직원이 나를 남의 이름으로 부름 · 팀장만 대답 · 이모지·인사말이 안 생김.
+
 ## 이 한 줄이 하는 일
 
 | 단계 | 내용 | 걸리는 시간 |

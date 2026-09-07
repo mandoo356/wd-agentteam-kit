@@ -430,6 +430,52 @@ def module_4():
     started = log.is_file() and "running" in log.read_text(encoding="utf-8", errors="ignore").lower()
     checks.append(("서버가 한 번 이상 정상 기동했다", started,
                    "정상" if started else "slack-server 폴더에서 py -3 server.py (환경점검이 한 번 켜 봅니다)"))
+
+    # ── 2026-09-08 추가: 강의장에서 실제로 난 세 가지 ─────────────────
+    #   ① 직원이 대표를 남의 이름으로 부름  → facts.md 에 내 이름이 있어야 한다
+    #   ② 팀장만 대답                        → personas 표시 이름이 직원 파일과 짝이 맞아야 한다
+    #   ③ 이모지·캐릭터가 안 생김            → 아이콘이 슬랙 형식으로 바뀌는지, 인사말에 빈칸이 없는지
+    try:
+        sys.path.insert(0, str(srv))
+        import roster  # slack-server/roster.py (엔진)
+    except Exception:
+        roster = None
+    if roster is not None:
+        name, src = roster.owner_name(ROOT)
+        checks.append(("대표 이름을 facts.md 에 적었다 (직원이 나를 알아보는 근거)", bool(name),
+                       f"정상 ({src})" if name
+                       else "workspace/memory/facts.md 의 '- 이름:' 줄에 내 이름 (카드 P1). 홍길동은 빈칸으로 봅니다"))
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("personas_check", srv / "personas.py")
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            personas = getattr(mod, "PERSONAS", {}) or {}
+            perr = ""
+        except Exception as e:  # noqa: BLE001
+            personas, perr = {}, f"{type(e).__name__}: {str(e)[:60]}"
+        checks.append(("personas.py 가 읽힌다", not perr,
+                       "정상" if not perr else f"personas.py 문법 오류 — {perr}. git checkout slack-server/personas.py 로 되돌리고 P11 다시"))
+        if personas:
+            agents_keys = set(roster.load_agents(ROOT))
+            orphan = [k for k in personas if k not in agents_keys]
+            checks.append(("personas 의 키가 직원 파일과 짝이 맞다", not orphan,
+                           "정상" if not orphan
+                           else "짝이 없는 키: " + ", ".join(orphan) + " — 키(staff1 같은 영어 이름)는 바꾸지 마세요"))
+            names = [str(p.get("display_name", "")).strip() for p in personas.values()]
+            dup = sorted({n for n in names if names.count(n) > 1})
+            default_names = [n for n in names if re.fullmatch(r"직원\d+", n)]
+            checks.append(("표시 이름이 서로 다르고 '직원1' 기본값이 아니다", not dup and not default_names,
+                           "정상" if not dup and not default_names
+                           else ("겹침: " + ", ".join(dup) + " / " if dup else "") +
+                                ("아직 기본값: " + ", ".join(default_names) + " → 카드 P11" if default_names else "")))
+            bad_icon = [k for k, p in personas.items() if not roster.emoji_ok(p.get("icon_emoji"))]
+            checks.append(("아이콘이 슬랙에 뜨는 형식이다 (📄 또는 :page_facing_up:)", not bad_icon,
+                           "정상" if not bad_icon else "못 알아듣는 아이콘: " + ", ".join(bad_icon)))
+            ph = [k for k, p in personas.items()
+                  if roster.intro_placeholders(str(p.get("intro", "")) + str(p.get("intro_class", "")))]
+            checks.append(("인사말에 [무엇] 빈칸이 없다 (팀 소개 때 캐릭터가 나오는 근거)", not ph,
+                           "정상" if not ph else "빈칸 남음: " + ", ".join(ph) + " → 카드 P11 (인사말까지 채웁니다)"))
     return checks
 
 

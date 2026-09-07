@@ -121,6 +121,15 @@ py -3 점검.py 0
 
 ---
 
+## 이미 설치했다면 — 새 판으로 올리기 (2026-09-08)
+
+강의장 판은 슬랙에서 **직원이 나를 남의 이름으로 부르고 · 팀장만 대답하고 · 이모지가 안 뜨는** 문제가 있었습니다.
+PowerShell 에 아래 한 줄. 엔진만 바꾸고 내가 만든 직원·스킬·`personas.py`·`.env` 는 그대로 둡니다.
+
+```powershell
+irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/update.ps1 | iex
+```
+
 ## 합격 판정 받는 법
 
 모듈이 끝날 때마다 검은 창에서:
