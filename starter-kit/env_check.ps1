@@ -22,7 +22,7 @@
     -SkipLogin        로그인 창 안 띄움
     -SkipSlack        슬랙 열쇠 입력·확인 건너뜀
     -NoServerTest     서버 첫 기동 시험 안 함
-    -OptionalLogins   Google Flow·네이버 로그인 창도 띄움 (기본은 안 띄움 — 수업 중 카드로 진행)
+    -OptionalLogins   네이버 블로그 로그인 창도 띄움 (기본은 안 띄움 — 수업 중 카드로 진행)
     -NoBrowser        HTML·안내 페이지 안 열음
     -NoPause          끝나고 Enter 대기 안 함
     -Yes              (호환용) 남아 있는 Enter 대기를 건너뜀
@@ -275,6 +275,21 @@ function Check-Claude {
     Set-Result 'claude' 'Claude Code 설치' '필수' $false '설치 안 됨' 'winget install --exact --id Anthropic.ClaudeCode' 'https://code.claude.com/docs/en/setup'
 }
 
+function Check-ClaudeVersion {
+    # claude.ai 커넥터(구글 캘린더·지메일·드라이브)가 터미널에 도구로 넘어오는 것은 2.1.46 판부터다.
+    # 그 전 판은 커넥터를 붙여도 터미널이 모른다 — 강의장 "구글 연결이 안 돼요"의 첫째 원인 (2026-09-08).
+    if (-not (Is-Ok 'claude')) { return (Set-Result 'claude-ver' 'Claude Code 최신판 (구글 커넥터 지원)' '필수' $false 'Claude Code 먼저 설치') }
+    $r = Invoke-Cmd 'claude --version' 40
+    $line = First-Line $r.out
+    $ok = $false; $d = "판을 읽지 못함: $line"
+    if ($line -match '(\d+)\.(\d+)\.(\d+)') {
+        $v = [version]("$($Matches[1]).$($Matches[2]).$($Matches[3])")
+        $ok = ($v -ge [version]'2.1.46')
+        $d = "v$v"; if (-not $ok) { $d = "v$v — 2.1.46 이상이어야 구글 커넥터가 붙습니다" }
+    }
+    Set-Result 'claude-ver' 'Claude Code 최신판 (구글 커넥터 지원, 2.1.46 이상)' '필수' $ok $d 'claude update' 'https://code.claude.com/docs/en/setup'
+}
+
 function Check-ClaudeLogin([switch]$Quiet) {
     if (-not (Is-Ok 'claude')) {
         if ($Quiet) { return $false }
@@ -404,15 +419,8 @@ function Check-VSCode {
 function Check-Chrome {
     $p = $null
     foreach ($c in @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe", "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe")) { if (Test-Path $c) { $p = $c } }
-    $d = '네이버 블로그·Google Flow 스킬이 실제 Chrome 을 씁니다'; if ($p) { $d = $p }
-    Set-Result 'chrome' 'Google Chrome (블로그·이미지 스킬용)' '선택' ([bool]$p) $d 'google.com/chrome' 'https://www.google.com/chrome/'
-}
-
-function Check-FlowLogin {
-    $prof = Join-Path $USERHOME '.claude\.image-flow-profile'
-    $ok = (Test-Path $prof) -and (@(Get-ChildItem $prof -Force -ErrorAction SilentlyContinue).Count -gt 0)
-    $d = '아직 로그인 안 함 (Gemini 구독 계정 필요, 세션 약 8시간)'; if ($ok) { $d = "로그인 기록 있음 — $prof" }
-    Set-Result 'flow-login' 'Google Flow 로그인 (이미지 스킬)' '선택' $ok $d 'py -3.14 flow-image-JJ\scripts\flow_login.py' 'https://labs.google/fx/tools/flow'
+    $d = '네이버 블로그 임시저장이 실제 Chrome 을 씁니다'; if ($p) { $d = $p }
+    Set-Result 'chrome' 'Google Chrome (네이버 블로그 임시저장용)' '선택' ([bool]$p) $d 'google.com/chrome' 'https://www.google.com/chrome/'
 }
 
 function Check-NaverLogin {
@@ -519,6 +527,22 @@ function Fix-Claude {
         Check-Claude | Out-Null
     }
     if (-not (Is-Ok 'claude')) { Write-Warn '자동 설치가 전부 막혔습니다. 회사 보안 정책이면 개인 노트북으로 진행하세요.' }
+}
+
+function Fix-ClaudeVersion {
+    if ((Is-Ok 'claude-ver') -or -not (Is-Ok 'claude')) { return }
+    if ($SkipInstall) { Write-Info '(-SkipInstall) Claude Code 업데이트 생략'; return }
+    Write-Step 'Claude Code 를 최신판으로 올립니다 (묻지 않음, 1분 안팎)'
+    $r = Invoke-Cmd 'claude update' 240
+    Check-ClaudeVersion | Out-Null
+    if (Is-Ok 'claude-ver') { return }
+    if (Has-Cmd 'npm') {
+        Write-Info 'claude update 로 안 올라가 npm 으로 다시 설치합니다'
+        $null = Invoke-Cmd 'npm install -g @anthropic-ai/claude-code@latest' 300
+        Refresh-Path
+        Check-ClaudeVersion | Out-Null
+    }
+    if (-not (Is-Ok 'claude-ver')) { Write-Warn 'Claude Code 를 올리지 못했습니다. 검은 창에서 claude update 를 직접 실행해 보세요.' }
 }
 
 function Fix-ClaudeLogin {
@@ -651,14 +675,6 @@ function Test-Server {
 function Fix-OptionalLogins {
     if ($SkipLogin -or -not $OptionalLogins) { return }
     if (-not ((Is-Ok 'python') -and (Is-Ok 'playwright') -and (Is-Ok 'chrome'))) { return }
-    if (-not (Is-Ok 'flow-login')) {
-        $script_ = Join-Path $KIT 'flow-image-JJ\scripts\flow_login.py'
-        if (Test-Path $script_) {
-            Open-NewWindow 'Google-Flow-로그인' "$($script:PY) `"$script_`"" (Split-Path $script_)
-            Wait-Enter '크롬 창에서 Google 로그인을 마치고 "[OK] 로그인 완료" 가 뜨면'
-            Check-FlowLogin | Out-Null
-        }
-    }
     if (-not (Is-Ok 'naver-login')) {
         $script_ = Join-Path $KIT 'naver-blog\naver_draft.py'
         if (Test-Path $script_) {
@@ -670,6 +686,77 @@ function Fix-OptionalLogins {
             }
         }
     }
+}
+
+function Check-MailEnv {
+    # 🔒 값은 절대 화면에 찍지 않는다. 키 이름이 있는지만 본다.
+    $envf = Join-Path $KIT 'mail\.env'
+    if (-not (Test-Path (Join-Path $KIT 'mail\mail_check.py'))) { return }
+    if (-not (Test-Path $envf)) { return (Set-Result 'mail' '메일 연결 (네이버·다음·지메일 앱 비밀번호)' '선택' $false 'mail\.env 가 아직 없습니다' '환경점검.bat 을 다시 실행해 앱 비밀번호를 붙여넣습니다' 'https://mail.naver.com/') }
+    $vals = @{}
+    foreach ($line in (Get-Content $envf -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+        $l = $line -replace '^﻿', ''
+        if ($l.Trim().StartsWith('#') -or $l -notmatch '=') { continue }
+        $k, $v = $l -split '=', 2
+        $vals[$k.Trim().ToUpper()] = $v.Trim()
+    }
+    $missing = @(@('MAIL_PROVIDER', 'MAIL_USER', 'MAIL_APP_PASSWORD') | Where-Object { -not $vals.ContainsKey($_) -or -not $vals[$_] })
+    $d = "$($vals['MAIL_PROVIDER']) $($vals['MAIL_USER']) (비밀번호는 확인하지 않습니다)"; if ($missing.Count) { $d = ($missing -join ', ') + ' 비어 있음' }
+    Set-Result 'mail' '메일 연결 (네이버·다음·지메일 앱 비밀번호)' '선택' ($missing.Count -eq 0) $d '환경점검.bat 을 다시 실행해 앱 비밀번호를 붙여넣습니다' 'https://mail.naver.com/'
+}
+
+function Fix-Mail {
+    # 메일은 선택이다. 슬랙 열쇠처럼 별표로 받아 mail\.env 에만 저장한다. s 면 건너뛴다.
+    if ((Is-Ok 'mail') -or $SkipSlack -or $SkipLogin) { return }
+    if (-not (Test-Path (Join-Path $KIT 'mail\mail_check.py'))) { return }
+    $envf = Join-Path $KIT 'mail\.env'
+    Write-Step '메일 연결 (선택) — 강의 문의 메일을 직원이 읽게 합니다. 앱 비밀번호는 교안 7쪽대로 미리 받아 둡니다'
+    Write-Info '네이버: 메일 → 환경설정 → POP3/IMAP 에서 IMAP 켜기 → 네이버 보안 → 2단계 인증 → 애플리케이션 비밀번호'
+    Write-Info '다음: 메일 → 설정 → IMAP/SMTP 사용 → 카카오계정 2단계 인증 → 앱 비밀번호   /   지메일: 구글 계정 → 보안 → 앱 비밀번호'
+    $prov = ''
+    while ($true) {
+        $prov = (Read-Host '  ? 어느 메일인가요 — naver / daum / gmail 중 하나 (나중에 하려면 s)').Trim().ToLower()
+        if ($prov -eq 's') { Write-Info '메일은 나중에. 수업 중 카드 P19 로 다시 할 수 있습니다.'; return }
+        if ($prov -in @('naver', 'daum', 'gmail')) { break }
+        Write-Warn 'naver, daum, gmail 중 하나를 영문으로 적어 주세요'
+    }
+    $user = ''
+    while ($true) {
+        $user = (Read-Host '  ? 메일 주소 전체 (예: hong@naver.com)').Trim().Trim('"').Trim("'")
+        if ($user -match '^[^@\s]+@[^@\s]+\.[^@\s]+$') { break }
+        Write-Warn '@ 가 들어간 메일 주소 전체를 적어 주세요'
+    }
+    $pw = ''
+    while ($true) {
+        $s = Read-Host '  ? 앱 비밀번호 (로그인 비밀번호가 아닙니다) — 붙여넣고 Enter (나중에 하려면 s)' -AsSecureString
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
+        try { $pw = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        $pw = $pw.Trim().Trim('"').Trim("'")
+        if ($pw.ToLower() -eq 's') { Write-Info '메일은 나중에.'; return }
+        if ($pw.Length -ge 8) { break }
+        Write-Warn '너무 짧습니다. 앱 비밀번호를 다시 붙여넣으세요 (붙여넣기 = 마우스 오른쪽 클릭)'
+    }
+    $body = "# 메일 열쇠 — 환경점검이 $([DateTime]::Now.ToString('yyyy-MM-dd HH:mm')) 에 저장. 비밀번호와 같습니다. 남에게 주지 마세요.`n" +
+            "MAIL_PROVIDER=$prov`nMAIL_USER=$user`nMAIL_APP_PASSWORD=$pw`nMAIL_ALLOW_EXTERNAL=0`n"
+    try {
+        [IO.File]::WriteAllText($envf, $body, (New-Object System.Text.UTF8Encoding($false)))   # BOM 없이
+        Write-Info "mail\.env 저장됨 (BOM 없음)"
+    } catch { Write-Warn "mail\.env 저장 실패: $_"; return }
+    Check-MailEnv | Out-Null
+}
+
+function Test-MailLive {
+    # 앱 비밀번호가 실제로 통하는지 메일 서버에 물어본다 (값은 출력하지 않는다).
+    if (-not (Is-Ok 'mail')) { return }
+    if (-not (Is-Ok 'python') -or -not $script:PY) { return }
+    $chk = Join-Path $KIT 'mail\mail_check.py'
+    if (-not (Test-Path $chk)) { return }
+    Write-Step '메일 서버에 실제로 로그인해 봅니다 (비밀번호는 화면에 나오지 않습니다)'
+    $r = Invoke-Cmd "$($script:PY) `"$chk`"" 60
+    $lines = @($r.out -split "`r?`n" | Where-Object { $_.Trim() })
+    foreach ($l in $lines) { Write-Info $l }
+    $d = ($lines | Select-Object -Last 1); if (-not $d) { $d = '응답 없음' }
+    Set-Result 'mail-live' '메일 로그인이 실제로 통한다' '선택' $r.ok $d 'mail\README.md 의 오류 3가지를 보고 앱 비밀번호를 다시 받습니다'
 }
 
 # ── 5. 결과 HTML ─────────────────────────────────────────────
@@ -790,6 +877,8 @@ Fix-Python
 if (-not $script:PY) { Check-Pip | Out-Null }
 Check-Claude | Out-Null
 Fix-Claude
+Check-ClaudeVersion | Out-Null
+Fix-ClaudeVersion
 Check-VSCode | Out-Null
 Check-Chrome | Out-Null
 
@@ -809,8 +898,10 @@ Fix-Slack
 Test-SlackLive
 Test-Server
 
-Write-Step '6/6 선택 항목 (스킬용 로그인 — 수업 중 카드로 진행)'
-Check-FlowLogin | Out-Null
+Write-Step '6/6 선택 항목 (메일 연결 · 네이버 블로그 로그인)'
+Check-MailEnv | Out-Null
+Fix-Mail
+Test-MailLive
 Check-NaverLogin | Out-Null
 Fix-OptionalLogins
 

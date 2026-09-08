@@ -72,6 +72,8 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger("agent")
+# 이 초가 지나도 답이 없으면 "아직 만드는 중" 한 줄을 먼저 보낸다. 0 이면 끈다.
+INTERIM_SEC = int(os.environ.get("INTERIM_SEC", "90"))
 
 if not WORKSPACE.exists():
     log.error("workspace 폴더가 없습니다: %s", WORKSPACE)
@@ -333,12 +335,27 @@ async def on_message(event, client, say):
         except Exception as e:
             log.warning("'처리 중' 삭제 실패: %s", e)
 
+    async def interim():
+        """90초가 지나면 한 줄 중간 보고. 침묵으로 3분을 채우지 않는다 (2026-09-08)."""
+        try:
+            await asyncio.sleep(INTERIM_SEC)
+            await post_as_agent(client, channel_id, agent,
+                                f"{p['display_name']}: 아직 만드는 중이에요, 조금만요")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            log.warning("중간 보고 실패: %s", e)
+
+    interim_task = asyncio.create_task(interim()) if INTERIM_SEC > 0 else None
+
     try:
         reply = await invoke_agent(
             agent=agent, user_message=text,
             workspace=WORKSPACE, cli_path=CLAUDE_CLI,
             speaker_name=OWNER_NAME,
         ) or "(빈 응답)"
+        if interim_task:
+            interim_task.cancel()
         bubbles = split_reply(reply) or [(None, "(빈 응답)")]
         await drop_ack()
         for who, body in bubbles:
@@ -347,6 +364,8 @@ async def on_message(event, client, say):
         log_conversation(agent, "bot", f"{agent} ←", reply)
     except Exception as e:
         # 넓게 잡는다: 여기서 예외가 새면 슬랙에는 '처리 중'만 남고 끝난다.
+        if interim_task:
+            interim_task.cancel()
         log.exception("직원 호출 실패 (%s): %s", type(e).__name__, e)
         await drop_ack()
         try:

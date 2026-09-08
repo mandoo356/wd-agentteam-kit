@@ -945,10 +945,10 @@ def main() -> int:
     ap.add_argument("--images-dir", default="",
                     help="이 폴더의 이미지를 이름순으로 최대 4장 사용. --images 대신 쓴다.")
     ap.add_argument("--no-images", action="store_true",
-                    help="이미지 없이 글만 올린다. 이걸 안 붙이면 이미지 0장일 때 자동 생성한다.")
-    ap.add_argument("--auto-images", type=int, default=3,
-                    help="이미지를 안 주면 이 장수만큼 직접 만들어 넣는다(기본 3, 최대 4). "
-                         "0 으로 주면 자동 생성 없이 예전처럼 멈춘다.")
+                    help="(호환용) 이미지 없이 글만 올린다. 2026-09-08 판부터는 안 붙여도 이미지가 없으면 글만 올린다.")
+    ap.add_argument("--auto-images", type=int, default=0,
+                    help="이미지를 안 줬을 때 Gemini 로 직접 만들어 넣을 장수(최대 4). 기본 0 — 만들지 않는다. "
+                         "AI 삽화 자동 생성은 오래 걸리고 결제 키가 필요해 기본에서 뺐다(2026-09-08). 쓰려면 naver-blog/.env 에 GOOGLE_API_KEY.")
     ap.add_argument("--raw", action="store_true",
                     help="정제 없이 파일 내용 그대로 붙여넣는다(내부 메모까지 들어감).")
     a = ap.parse_args()
@@ -999,19 +999,16 @@ def main() -> int:
         imgs = sorted(p for p in d.iterdir()
                       if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"))
         log(f"{d} 에서 이미지 {len(imgs)}장 발견")
-    # 이미지 0장이 조용히 지나가서 글만 올라간 적이 있다(2026-08-09, 2026-08-14).
-    # 이제는 멈추는 대신 직접 만든다 — 절차를 사람이 기억하게 두면 계속 샌다.
+    # 2026-09-08: 이미지가 없으면 글만 올린다. AI 삽화 자동 생성(예전 기본 3장)은 오래 걸리고
+    # 결제 키가 필요해 기본에서 뺐다. 대표가 찍은 사진은 --images / --images-dir 로 넣는다.
     if not imgs and not a.no_images and a.auto_images > 0:
         n = min(a.auto_images, MAX_IMAGES)
-        log(f"이미지가 0장입니다 → 삽화 {n}장을 직접 생성합니다 (끄려면 --no-images)")
+        log(f"이미지가 0장입니다 → 삽화 {n}장을 직접 생성합니다 (--auto-images {a.auto_images})")
         imgs = auto_generate_images(a.title, body, bf.parent / "img", n)
         if not imgs:
-            log("자동 생성이 모두 실패했습니다. 글만 올리려면 --no-images 를 붙이세요.")
-            return EXIT_INPUT
-    if not imgs and not a.no_images:
-        log("이미지가 0장입니다. --images/--images-dir 를 주거나, "
-            "정말 글만 올리려면 --no-images 를 붙이세요.")
-        return EXIT_INPUT
+            log("자동 생성이 모두 실패했습니다 → 글만 올립니다.")
+    if not imgs:
+        log("이미지 없이 글만 올립니다. 사진을 넣으려면 --images 또는 --images-dir.")
     missing = [str(p) for p in imgs if not p.exists()]
     if missing:
         log(f"이미지 파일 없음: {missing}")

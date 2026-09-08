@@ -86,7 +86,14 @@ $files = @(
     'slack-server/README.md',
     '점검.py',
     '프롬프트카드.md',
-    'README.md'
+    'README.md',
+    'mail/mail_common.py',
+    'mail/mail_check.py',
+    'mail/mail_read.py',
+    'mail/mail_send.py',
+    'mail/README.md',
+    'mail/.env.example',
+    'mail/skill/SKILL.md'
 )
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $bak   = Join-Path $Kit "backup\update-$stamp"

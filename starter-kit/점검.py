@@ -207,7 +207,7 @@ def module_0():
 def module_1():
     files = agent_files()
     checks = [("직원이 1명 이상 있다", len(files) >= 1, f"{len(files)}명")]
-    checks.append(("직원이 8명 이상 있다", len(files) >= 8, f"{len(files)}명"))
+    checks.append(("직원이 5명 이상 있다", len(files) >= 5, f"{len(files)}명"))
 
     bad = []
     names = []
@@ -316,7 +316,7 @@ def module_3():
     wb = workbooks()
     checks.append(("교재 워크북(.html)이 나왔다", len(wb) >= 1,
                    wb[0].name if wb else
-                   "카드 P8b 를 붙여넣고 'staff3 불러서 inbox 확인하고 이어서 교재 만들어줘'"))
+                   "카드 P8b 를 붙여넣고 'staff2 불러서 inbox 확인하고 이어서 교재 만들어줘'"))
 
     checks.append(("워크북이 인쇄용 A4다", printable(wb),
                    "정상 (@page 설정 있음)" if printable(wb) else
@@ -337,7 +337,7 @@ def module_4():
     # 슬랙이 아무리 잘 붙어도 직원 파일이 없으면 아무도 대답하지 않는다.
     # 예전에는 이걸 안 봐서, 직원 0명인데 모듈 4가 통과하고 나중에 터졌다.
     agents = agent_files()
-    checks = [("직원이 8명 이상 있다 (모듈 1 완료)", len(agents) >= 8,
+    checks = [("직원이 5명 이상 있다 (모듈 1 완료)", len(agents) >= 5,
                f"{len(agents)}명" if agents else "0명 — 모듈 1을 먼저 하세요")]
 
     # `.md.txt` 로 잘못 저장된 파일 잡기. 탐색기가 확장자를 숨기면 눈으로는 구별이 안 된다.
@@ -494,7 +494,7 @@ def module_5():
     checks.append(("내 회사 이름으로 바꿨다", changed,
                    "정상" if changed else "company.config 의 회사 이름이 아직 기본값입니다"))
 
-    checks.append(("직원 수가 office 와 맞는다", len(agent_files()) >= 8,
+    checks.append(("직원 수가 office 와 맞는다", len(agent_files()) >= 5,
                    f"직원 {len(agent_files())}명"))
     return checks
 

@@ -12,6 +12,9 @@
    .claude/agents/ 의 파일 이름과 짝이라서, 바꾸면 연결이 끊깁니다.
    바꿔도 되는 건 display_name 과 icon_emoji, 그리고 인사말입니다.
 
+➕ 6번째 직원을 데려오면(카드 P14) 아래에 "staff6": {...} 칸을 하나 더 만들고 INTRO_ORDER 에도 넣으세요.
+   직원 파일이 없는 키는 명단에서 자동으로 빠지지만, 점검 4 에서 "짝이 없는 키"로 잡힙니다.
+
 고친 뒤에는 서버를 껐다 켜야 반영됩니다. (검은 창에서 Ctrl+C → 다시 실행)
 """
 
@@ -27,71 +30,44 @@ PERSONAS = {
     },
     "staff2": {
         "display_name": "직원2",
-        "icon_emoji": ":mortar_board:",
-        "intro": "🎓 직원2입니다. 제 담당은 [무엇]이에요.",
+        "icon_emoji": ":books:",
+        "intro": "📚 직원2입니다. 제 담당은 [무엇]이에요.",
         "intro_class": (
-            "🎓 안녕하세요, [무슨 일] 담당 *직원2*입니다.\n"
+            "📚 반갑습니다, [무슨 일] 담당 *직원2*입니다.\n"
             "[재밌는 한마디]"
         ),
     },
     "staff3": {
         "display_name": "직원3",
-        "icon_emoji": ":books:",
-        "intro": "📚 직원3입니다. 제 담당은 [무엇]이에요.",
+        "icon_emoji": ":lower_left_ballpoint_pen:",
+        "intro": "✍️ 직원3입니다. 제 담당은 [무엇]이에요.",
         "intro_class": (
-            "📚 반갑습니다, [무슨 일] 담당 *직원3*입니다.\n"
+            "✍️ 안녕하세요! [무슨 일] 담당 *직원3*입니다.\n"
             "[재밌는 한마디]"
         ),
     },
     "staff4": {
         "display_name": "직원4",
-        "icon_emoji": ":lower_left_ballpoint_pen:",
-        "intro": "✍️ 직원4입니다. 제 담당은 [무엇]이에요.",
+        "icon_emoji": ":calendar:",
+        "intro": "📅 직원4입니다. 제 담당은 [무엇]이에요.",
         "intro_class": (
-            "✍️ 안녕하세요! [무슨 일] 담당 *직원4*입니다.\n"
+            "📅 반갑습니다, [무슨 일] 담당 *직원4*입니다.\n"
             "[재밌는 한마디]"
         ),
     },
     "staff5": {
         "display_name": "직원5",
-        "icon_emoji": ":moneybag:",
-        "intro": "💰 직원5입니다. 제 담당은 [무엇]이에요.",
-        "intro_class": (
-            "💰 [무슨 일] 담당 *직원5*입니다.\n"
-            "[재밌는 한마디]"
-        ),
-    },
-    "staff6": {
-        "display_name": "직원6",
         "icon_emoji": ":bust_in_silhouette:",
-        "intro": "🪪 직원6입니다. 제 담당은 [무엇]이에요.",
+        "intro": "🪪 직원5입니다. 제 담당은 [무엇]이에요.",
         "intro_class": (
-            "🪪 안녕하세요, [무슨 일] 담당 *직원6*입니다.\n"
-            "[재밌는 한마디]"
-        ),
-    },
-    "staff7": {
-        "display_name": "직원7",
-        "icon_emoji": ":calendar:",
-        "intro": "📅 직원7입니다. 제 담당은 [무엇]이에요.",
-        "intro_class": (
-            "📅 반갑습니다, [무슨 일] 담당 *직원7*입니다.\n"
-            "[재밌는 한마디]"
-        ),
-    },
-    "staff8": {
-        "display_name": "직원8",
-        "icon_emoji": ":art:",
-        "intro": "🎨 직원8입니다. 제 담당은 [무엇]이에요.",
-        "intro_class": (
-            "🎨 안녕하세요! [무슨 일] 담당 *직원8*입니다.\n"
+            "🪪 안녕하세요, [무슨 일] 담당 *직원5*입니다.\n"
             "[재밌는 한마디]"
         ),
     },
 }
 
 # "팀 소개" 할 때 인사하는 순서
-INTRO_ORDER = ["staff1", "staff2", "staff3", "staff4", "staff5", "staff6", "staff7", "staff8"]
+INTRO_ORDER = ["staff1", "staff2", "staff3", "staff4", "staff5"]
 
 # 강의장에서 "애들아 인사" 했을 때 맨 앞뒤에 붙는 말
 CLASS_OPENING = (

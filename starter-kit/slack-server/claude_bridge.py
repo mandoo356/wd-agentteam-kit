@@ -44,8 +44,18 @@ SESSION_FILE = Path(__file__).resolve().parent / ".agent_session.json"
 # 3시간. 예전엔 24시간이었는데, 어제 대화(다른 이름·옛 요청)를 오늘까지 끌고 와서
 # "왜 아직도 그 얘기야" 가 됐다. 슬랙에서 "새 대화" 라고 치면 즉시 잊는다 (server.py).
 SESSION_MAX_AGE_SEC = int(os.environ.get("SESSION_MAX_AGE_SEC", str(3 * 3600)))
-# 직원 파일 본문을 프롬프트에 넣을 때 상한 (캐릭터가 살아나되 너무 길지 않게)
-AGENT_BODY_LIMIT = int(os.environ.get("AGENT_BODY_LIMIT", "1400"))
+# 직원 파일 본문을 프롬프트에 넣을 때 상한. 2026-09-08 1,400 → 3,000.
+# 카드 P5·P6·P7 이 팀장 파일에 줄을 덧붙이면 1,400 을 넘겨 뒤쪽 규칙이 잘려 나갔다 —
+# "역할을 잊는" 게 아니라 못 본 것이었다. 입력 길이는 도구 왕복 한 번보다 훨씬 싸다.
+AGENT_BODY_LIMIT = int(os.environ.get("AGENT_BODY_LIMIT", "3000"))
+# 슬랙 답에 쓸 모델. 비우면 Claude Code 기본값. 슬랙 답은 5줄이라 sonnet 이면 체감이 크게 빨라진다.
+# 강사 시연 PC 처럼 큰 산출물 품질이 중요하면 .env 에 AGENT_MODEL=opus.
+AGENT_MODEL = os.environ.get("AGENT_MODEL", "sonnet").strip()
+# 한 대화에 이만큼 주고받으면 서버가 스스로 "새 대화"를 한다. 뒤로 갈수록 느려지고
+# 앞 직원의 정체성이 섞이는 것을 막는다. 결과물은 파일·inbox 에 남으니 실무 손해는 작다.
+SESSION_MAX_TURNS = int(os.environ.get("SESSION_MAX_TURNS", "30"))
+# 팀 규약(facts.md)을 프롬프트에 넣을 때 상한
+FACTS_LIMIT = int(os.environ.get("FACTS_LIMIT", "3000"))
 
 
 class ClaudeError(RuntimeError):
@@ -83,6 +93,7 @@ class AgentPool:
         self._lock = asyncio.Lock()
         self._connect_lock = asyncio.Lock()
         self._session_id: Optional[str] = self._load_session()
+        self._turns = 0  # 이 세션에서 주고받은 횟수 (SESSION_MAX_TURNS 넘으면 새 대화)
 
     # ---- 대화 기억 ---------------------------------------------------------
     @staticmethod
@@ -128,6 +139,7 @@ class AgentPool:
             cwd=str(KIT_ROOT),
             add_dirs=[str(KIT_ROOT), str(self.workspace)],
             resume=self._session_id,
+            model=AGENT_MODEL or None,
             permission_mode="bypassPermissions",
             # .claude/hooks/guard.py 가 "슬랙에서 부른 작업"임을 알아, 삭제·덮어쓰기를 확인 창 대신 차단한다.
             env={"WD_CHANNEL": "slack"},
@@ -220,6 +232,44 @@ class AgentPool:
             rows.append(f"  - {disp} ({k}): {describe(agents.get(k)) or '담당 미정'}")
         return "\n".join(rows)
 
+    @staticmethod
+    def _facts_text() -> str:
+        """팀 규약을 서버가 읽어 프롬프트에 넣는다.
+        예전엔 "먼저 facts.md 를 읽어라"고 시켜서 메시지마다 모델이 파일을 읽으러 한 번씩
+        왕복했다(2026-09-08 속도 개선). 지금은 여기서 읽어 주고, 모델은 바로 답한다."""
+        p = KIT_ROOT / "workspace" / "memory" / "facts.md"
+        try:
+            t = p.read_text(encoding="utf-8-sig", errors="replace").strip()
+        except Exception:
+            return "(facts.md 없음 — 카드 P1 로 만든다)"
+        if len(t) > FACTS_LIMIT:
+            t = t[:FACTS_LIMIT] + "\n…(이하 생략 — 전문은 workspace/memory/facts.md)"
+        return t or "(facts.md 비어 있음)"
+
+    @staticmethod
+    def _inbox_text(agent: str, limit: int = 3, each: int = 400) -> str:
+        """자기 inbox 쪽지를 서버가 읽어 프롬프트에 넣는다. 없으면 한 줄."""
+        d = KIT_ROOT / "workspace" / "inbox" / agent
+        try:
+            files = sorted((p for p in d.glob("*.md") if p.is_file()),
+                           key=lambda p: p.stat().st_mtime, reverse=True)
+        except Exception:
+            files = []
+        if not files:
+            return "  (쪽지 없음)"
+        rows = []
+        for p in files[:limit]:
+            try:
+                body = p.read_text(encoding="utf-8-sig", errors="replace").strip()
+            except Exception:
+                body = ""
+            if len(body) > each:
+                body = body[:each] + " …"
+            rows.append(f"  - {p.name}: {body}")
+        if len(files) > limit:
+            rows.append(f"  (외 {len(files) - limit}개 — workspace/inbox/{agent}/)")
+        return "\n".join(rows)
+
     def build_prompt(self, agent: str, user_message: str,
                      speaker_name: str = "") -> str:
         agents = load_agents(KIT_ROOT)
@@ -249,8 +299,15 @@ class AgentPool:
             f"[담당 직원 {disp} 의 정체성 — 이 성격·말투·담당대로 답한다]",
             body or "(직원 파일 본문 없음)",
             "",
+            "[팀 규약 — workspace/memory/facts.md 전문. 다시 읽으러 가지 않는다]",
+            self._facts_text(),
+            "",
+            f"[내 inbox — workspace/inbox/{agent}/ 에 온 쪽지. 다시 읽으러 가지 않는다]",
+            self._inbox_text(agent),
+            "",
             "[일하는 규칙]",
-            f"- 먼저 workspace/memory/facts.md 를 읽고, 자기 inbox(workspace/inbox/{agent}/)에 온 쪽지가 있으면 확인한다.",
+            "- 위 팀 규약과 inbox 는 이미 읽은 것으로 친다 (다시 읽지 않는다). 인사·질문·짧은 답은 도구 없이 바로 답한다. "
+            "캘린더·메일·파일을 실제로 봐야 하는 일은 도구를 쓰고 결과까지 답한다 — '확인 중이에요' 같은 미완의 말로 끝내지 않는다.",
             "- 요청이 기본 담당의 일이 아니면 명단에서 맞는 직원을 고르고 그 직원 이름으로 답한다. "
             "여러 직원이 얽힌 일이면 관련된 직원이 각자 한 줄씩 말한다 (팀장 혼자 다 말하지 않는다).",
             "- 파일을 만드는 큰 일이 다른 직원 몫이면 Agent 도구로 그 직원(subagent_type=키)에게 맡기고, "
@@ -267,6 +324,8 @@ class AgentPool:
             "",
             "---",
             user_message,
+            "",
+            f"(지금 답하는 사람은 {disp} 다. 앞 대화에서 누가 답했든 이번 답은 {disp} 의 정체성으로 한다.)",
         ]
         return "\n".join(parts)
 
@@ -276,6 +335,12 @@ class AgentPool:
         timeout_sec = timeout_sec or QUERY_TIMEOUT_SEC
         prompt = self.build_prompt(agent, user_message, speaker_name)
         async with self._lock:
+            if SESSION_MAX_TURNS > 0 and self._turns >= SESSION_MAX_TURNS:
+                log.info("대화가 %d번을 넘어 새 대화로 시작합니다 (SESSION_MAX_TURNS)", self._turns)
+                self.forget_session()
+                await self.close()
+                self._turns = 0
+            self._turns += 1
             try:
                 return await self._do_query(prompt, timeout_sec)
             except Exception as e:
