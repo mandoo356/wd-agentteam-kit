@@ -10,6 +10,12 @@ description: |
 version: 1.0
 ---
 
+> **참고 자료 순서 (2026-09-14 확정)**
+> 1순위 `C:/Agent/MyData/Profile` — 내가 실제로 쓴 프로필·이력서. 내용의 근거는 여기서만 나온다.
+> 2순위 `workspace/memory/facts.md` — 회사 이름·로고 글자·색 4개.
+> 이 문서의 슬라이드 골격은 **모양만** 정한다. 골격 안의 `{{ }}` 는 반드시 내 자료로 바꾼다.
+> 근거가 없으면 지어내지 말고 그 줄을 통째로 뺀다. 남의 실적·고객사를 남겨 두지 않는다.
+
 # 강사 프로필 덱 스킬 (범용)
 
 강사 1인의 개인 브랜딩 프로필을 **HTML 슬라이드(1920×1080px, 16:9)** 로 생성한다.
@@ -22,9 +28,14 @@ version: 1.0
 ## 0. 워크플로우 (순서 고정, 생략 금지)
 
 ```
+# STEP 0. 내 자료 먼저 — C:/Agent/MyData/Profile 폴더를 먼저 훑는다. (1순위)
+#         거기 있는 내 프로필·이력서가 이름·경력·자격·실적의 **유일한 출처**다.
+#         이 문서 §4 의 슬라이드 골격은 '화면 모양'만 정한다. 거기 적힌 문구는 예시가 아니라
+#         빈칸({{ }})이며, MyData 에 근거가 없는 항목은 채우지 말고 그 줄을 뺀다.
+
 # STEP 1. 입력 수집 — §2 입력 스키마의 필수 항목을 확인한다.
 #         빠진 항목은 추정하지 말고 사용자에게 묻는다. (§3-1)
-#         workspace/memory/facts.md 를 먼저 읽어 회사 이름·로고 글자·색 4개를 가져온다.
+#         workspace/memory/facts.md 를 읽어 회사 이름·로고 글자·색 4개를 가져온다.
 
 # STEP 2. HTML 작성 — §4 슬라이드 골격 + references/full_css.md
 #         저장 경로: workspace/결과물/<날짜>_<강사명>_프로필.html
@@ -63,11 +74,11 @@ py -3 .claude/skills/프로필/scripts/qa_screenshot.py workspace/결과물/<파
 
 | 키 | 필수 | 설명 | 예 |
 |---|---|---|---|
-| `instructor_name` | ● | 강사명 | 홍길동 |
-| `catchphrase` | ● | 한 줄 캐치프레이즈(연차 포함) | 웃음과 소통으로 완성하는 실전형 기업 교육 12년차 |
+| `instructor_name` | ● | 강사명 | (내 이름) |
+| `catchphrase` | ● | 한 줄 캐치프레이즈(연차 포함) | {{내 캐치프레이즈 — MyData/Profile 에서 뽑는다}} |
 | `cover_lead` | ● | 표지 슬로건 | 여러분의 성장을 함께합니다 |
 | `cover_tag` | ● | 표지 태그라인 | 기업과 교육생 모두의 성장을 위한 실전 중심 교육 솔루션을 제공합니다 |
-| `career` | ● | 경력 리스트. `현)`/`전)` 접두 | 현) 길동컨설팅 대표 강사 |
+| `career` | ● | 경력 리스트. `현)`/`전)` 접두 | 현) {{내 소속}} {{직함}} |
 | `certs` | ● | 자격 리스트 (2열 배치, 8~14개 권장) | 이미지 컨설턴트 1급 |
 | `refs.corp` | ● | 기업 교육 레퍼런스 (쉼표 나열) | |
 | `refs.public` | ○ | 공공기관 교육 레퍼런스 | |
@@ -77,7 +88,7 @@ py -3 .claude/skills/프로필/scripts/qa_screenshot.py workspace/결과물/<파
 | `why` | ● | 선택 이유 3개 (수식어 / 키워드 / 근거배지 2개) | |
 | `reviews` | ○ | 후기 3건 (업종 라벨 + 본문) | |
 | `field_photos` | ○ | 현장 사진 (8장 = 1슬라이드) | |
-| `stat_line` | ● | 실적 한 줄 | 연 200회 이상 출강 \| 누적 4,000회 이상 강의 |
+| `stat_line` | ● | 실적 한 줄 | (내 실적 한 줄. 없으면 비워 둔다) |
 | `contact` | ● | 이메일 · 휴대폰 | |
 
 `certs`는 홀수 개면 좌열이 1개 더 오도록 배치한다.
@@ -92,7 +103,7 @@ py -3 .claude/skills/프로필/scripts/qa_screenshot.py workspace/결과물/<파
 
 ### 3-2. 문체
 - 명사형 종결 중심. 경력·자격은 완전문장으로 늘리지 않는다.
-- 근거 없는 형용사 대신 **수치**로 표현한다. ("경험 풍부" → "누적 4,000회")
+- 근거 없는 형용사 대신 **수치**로 표현한다. ("경험 풍부" → "누적 ○○회" — 숫자는 MyData 의 내 자료에서만 가져온다)
 - 금지 표현: 정말/아주/굉장히, ~인 것 같습니다, ~하게 됩니다, 확 달라집니다.
 - 표지 슬로건·후기 리드·현장 서브카피는 **감성 문체 허용**(손글씨 느낌 구간). 그 외 본문은 HRD 문서 문체를 유지한다.
 
@@ -138,7 +149,7 @@ py -3 .claude/skills/프로필/scripts/qa_screenshot.py workspace/결과물/<파
   <div class="cv-logo"><span>[로고글자]</span></div>
   <div class="cv-body">
     <div class="cv-lead">여러분의 <span>성장</span>을 함께합니다.</div>
-    <div class="cv-name">홍길동 강사</div>
+    <div class="cv-name">{{강사명}} 강사</div>
     <div class="cv-tag">기업과 교육생 모두의 성장을 위한 실전 중심 교육 솔루션을 제공합니다</div>
   </div>
   <div class="cv-rule"></div>
@@ -150,27 +161,27 @@ py -3 .claude/skills/프로필/scripts/qa_screenshot.py workspace/결과물/<파
   <div class="dots"><i></i><i></i><i></i></div>
   <div class="in-photo"><img src="..." alt="강사"></div>
   <div class="in-right">
-    <div class="in-catch">웃음과 소통으로 완성하는 <span>실전형 기업 교육 12년차</span></div>
-    <div class="in-name">홍길동 강사</div>
+    <div class="in-catch">{{캐치프레이즈 앞부분}} <span>{{캐치프레이즈 뒷부분}}</span></div>
+    <div class="in-name">{{강사명}} 강사</div>
     <div class="in-cols">
       <div class="in-col">
         <span class="pill">강의 경력</span>
         <ul class="in-list">
-          <li class="now">현) 길동컨설팅 대표 강사</li>
+          <li class="now">현) {{내 소속}} {{직함}}</li>
           <li>전) ○○전자 교육센터 선임 강사</li>
         </ul>
       </div>
       <div class="in-col">
         <span class="pill">자격 사항</span>
         <ul class="in-list in-cert">
-          <li>- CS강사 1급</li><li>- TA 교류분석</li>
+          <li>- {{내 자격 1}}</li><li>- {{내 자격 2}}</li>
         </ul>
       </div>
     </div>
     <div class="in-logos">
-      <div class="logo-tile"><span>KT</span></div>
-      <div class="logo-tile"><span>LG전자</span></div>
-      <div class="logo-tile"><span>고용노동부</span></div>
+      <div class="logo-tile"><span>{{고객사1}}</span></div>
+      <div class="logo-tile"><span>{{고객사2}}</span></div>
+      <div class="logo-tile"><span>{{고객사3}}</span></div>
     </div>
   </div>
   <div class="page-num">02</div><div class="brand-mark"><span>[로고글자]</span></div>
@@ -181,7 +192,7 @@ py -3 .claude/skills/프로필/scripts/qa_screenshot.py workspace/결과물/<파
   <div class="sec-head"><div class="sec-bar"></div><div class="sec-title">강의 이력</div></div>
   <div class="dots"><i></i><i></i><i></i></div>
   <div class="hs-top">
-    <div class="logo-tile"><span>LG전자</span></div><!-- 3~5개 -->
+    <div class="logo-tile"><span>{{고객사3}}</span></div><!-- 3~5개 -->
   </div>
   <div class="hs-body">
     <div class="hs-row"><span class="pill">기업 교육</span><div class="hs-text">A, B, C 그 외 다수</div></div>
@@ -195,7 +206,7 @@ py -3 .claude/skills/프로필/scripts/qa_screenshot.py workspace/결과물/<파
 <div class="slide p-why">
   <div class="sec-head"><div class="sec-bar dark"></div><div class="sec-title dark">WHY</div></div>
   <div class="dots dark"><i></i><i></i><i></i></div>
-  <div class="why-q">왜 홍길동 강사를 선택해야 하는가?</div>
+  <div class="why-q">왜 {{강사명}} 강사를 선택해야 하는가?</div>
   <div class="why-grid">
     <div class="why-card">
       <div class="why-ico">🎓</div>
@@ -205,7 +216,7 @@ py -3 .claude/skills/프로필/scripts/qa_screenshot.py workspace/결과물/<파
   </div>
   <div class="why-badges">
     <div class="why-col">
-      <div class="why-badge">누적 <strong>4,000회</strong> 이상 강의</div>
+      <div class="why-badge">누적 <strong>{{누적 강의 횟수}}</strong> 이상 강의</div>
       <div class="why-badge">다양한 산업군 출강</div>
     </div><!-- ×3 -->
   </div>
@@ -215,12 +226,12 @@ py -3 .claude/skills/프로필/scripts/qa_screenshot.py workspace/결과물/<파
 <!-- 7. 교육 현장 -->
 <div class="slide p-field">
   <div class="sec-head"><div class="sec-bar"></div><div class="sec-title">교육 현장</div></div>
-  <div class="sec-sub">교육생의 <em>성장</em> 여정에 함께하는 강사, 홍길동입니다.</div>
+  <div class="sec-sub">교육생의 <em>성장</em> 여정에 함께하는 강사, {{강사명}}입니다.</div>
   <div class="dots"><i></i><i></i><i></i></div>
   <div class="fd-grid">
     <div class="fd-cell"><img src="..."></div><!-- ×8 -->
   </div>
-  <div class="fd-foot">연 200회 이상 출강 | 누적 <span>4,000회</span> 이상 강의</div>
+  <div class="fd-foot">{{실적 한 줄 — 모르면 이 줄을 통째로 뺀다}}</div>
   <div class="page-num">07</div>
 </div>
 

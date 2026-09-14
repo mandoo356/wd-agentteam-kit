@@ -20,7 +20,7 @@ npm run dev
 | | 슬랙 서버 | 가상 오피스 |
 |---|---|---|
 | 폴더 | `slack-server/` | `office/` |
-| 켜는 명령 | `py -3 server.py` | `npm run dev` |
+| 켜는 명령 | `py -3 -X utf8 server.py` | `npm run dev` |
 | 보는 곳 | 슬랙 앱 | 브라우저 `localhost:3000` |
 
 **둘 다 켜져 있어야** 회사가 온전히 돌아갑니다. 검은 창 두 개를 켜둔 채로 두세요.

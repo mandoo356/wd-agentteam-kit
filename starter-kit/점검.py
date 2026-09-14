@@ -305,6 +305,24 @@ def module_3():
     size = facts.stat().st_size if facts.is_file() else 0
     checks.append(("팀 규약에 내용이 채워져 있다", size > 200, f"{size} 바이트 (200 이상 필요)"))
 
+    # 2026-09-14 추가 — facts.md 의 인코딩. 메모장에서 'ANSI' 로 저장하면 한글이 깨져
+    # 직원이 대표 이름을 못 읽고 엉뚱한 이름을 지어냈다. 바이트 수만으로는 안 잡힌다.
+    enc_ok, enc_msg = True, "정상 (UTF-8)"
+    if facts.is_file():
+        raw = facts.read_bytes()
+        try:
+            raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            try:
+                raw.decode("cp949")
+                enc_ok = False
+                enc_msg = ("ANSI(CP949)로 저장돼 있습니다 — 메모장에서 열어 '다른 이름으로 저장' → "
+                           "인코딩 UTF-8 로 덮어쓰세요")
+            except UnicodeDecodeError:
+                enc_ok = False
+                enc_msg = "글자가 깨져 읽히지 않습니다 — 카드 P1 로 facts.md 를 다시 만드세요"
+    checks.append(("팀 규약이 UTF-8 로 저장돼 있다 (한글이 안 깨지는 근거)", enc_ok, enc_msg))
+
     notes = [p for p in (ROOT / "workspace" / "inbox").rglob("*") if p.is_file()]
     checks.append(("직원끼리 넘긴 쪽지가 1개 이상 있다", len(notes) >= 1,
                    f"{len(notes)}개" if notes else "workspace/inbox 가 비어 있습니다"))
@@ -429,7 +447,7 @@ def module_4():
     log = srv / "logs" / "server.log"
     started = log.is_file() and "running" in log.read_text(encoding="utf-8", errors="ignore").lower()
     checks.append(("서버가 한 번 이상 정상 기동했다", started,
-                   "정상" if started else "slack-server 폴더에서 py -3 server.py (환경점검이 한 번 켜 봅니다)"))
+                   "정상" if started else "slack-server 폴더에서 py -3 -X utf8 server.py (환경점검이 한 번 켜 봅니다)"))
 
     # ── 2026-09-08 추가: 강의장에서 실제로 난 세 가지 ─────────────────
     #   ① 직원이 대표를 남의 이름으로 부름  → facts.md 에 내 이름이 있어야 한다
@@ -441,10 +459,19 @@ def module_4():
     except Exception:
         roster = None
     if roster is not None:
-        name, src = roster.owner_name(ROOT)
-        checks.append(("대표 이름을 facts.md 에 적었다 (직원이 나를 알아보는 근거)", bool(name),
-                       f"정상 ({src})" if name
-                       else "workspace/memory/facts.md 의 '- 이름:' 줄에 내 이름 (카드 P1). 홍길동은 빈칸으로 봅니다"))
+        # 2026-09-14: '이름이 있다' 가 아니라 '이름이 한글로 제대로 읽힌다' 를 본다.
+        # 파일이 ANSI 로 저장돼 글자가 깨진 경우, 예전에는 "이름을 적으세요" 라는
+        # 엉뚱한 안내가 나갔다. 대표는 분명히 적었는데 계속 ❌ 가 떴다.
+        if hasattr(roster, "owner_name_detail"):
+            name, src, problem = roster.owner_name_detail(ROOT)
+        else:
+            name, src = roster.owner_name(ROOT)
+            problem = ""
+        detail = f"정상 ({src})" if name else (problem or "카드 P1 로 이름을 적으세요")
+        if name and problem:
+            detail = f"{name} — {problem}"
+        checks.append(("대표 이름이 한글로 제대로 읽힌다 (직원이 나를 알아보는 근거)",
+                       bool(name) and roster.is_hangul(name), detail))
         try:
             import importlib.util
             spec = importlib.util.spec_from_file_location("personas_check", srv / "personas.py")
@@ -508,17 +535,81 @@ def module_6():
     return out
 
 
+def module_35():
+    """모듈 3.5 — 내 자료(MyData)가 실제로 스킬에 반영됐는지.
+
+    2026-09-14 신설. 그전에는 점검 어디에도 MyData 가 없어서, P17·P18 을 건너뛰거나
+    에이전트가 '요약만 하고 스킬을 안 고친' 경우를 아무도 못 잡았다.
+    그 결과 수강생 결과물에 견본(홍길동·길동컨설팅·4,000회)이 그대로 나왔다.
+    """
+    import os
+    checks = []
+    mydata = Path(os.environ.get("WD_MYDATA", r"C:\Agent\MyData"))
+    checks.append(("내 자료 폴더(MyData)가 있다", mydata.is_dir(), str(mydata)))
+
+    counts = {}
+    for sub in ("Proposal", "Blog", "Logo", "Profile"):
+        d = mydata / sub
+        counts[sub] = len([f for f in d.glob("*") if f.is_file()]) if d.is_dir() else 0
+    filled = [k for k, v in counts.items() if v > 0]
+    checks.append(("내 자료를 넣었다 (제안서·블로그·로고·프로필 중 2종 이상)",
+                   len(filled) >= 2,
+                   " · ".join(f"{k} {v}개" for k, v in counts.items())))
+
+    skills = ROOT / ".claude" / "skills"
+    sk = [d for d in skills.glob("*") if d.is_dir()] if skills.is_dir() else []
+    checks.append(("스킬이 1개 이상 있다", len(sk) >= 1,
+                   ", ".join(d.name for d in sk) if sk else "카드 P4 부터 하세요"))
+
+    # 스킬이 MyData 를 1순위로 적어 두었는가 (P18 이 실제로 반영됐다는 근거)
+    texts = {}
+    for d in sk:
+        t = ""
+        for f in d.rglob("*.md"):
+            try:
+                t += f.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                pass
+        texts[d.name] = t
+    linked = [n for n, t in texts.items() if "MyData" in t]
+    checks.append(("스킬이 내 자료 폴더를 참고하라고 적고 있다 (카드 P18)",
+                   bool(linked),
+                   ", ".join(linked) if linked else
+                   "카드 P18 을 붙여넣어 스킬을 내 자료로 덮어쓰세요"))
+
+    # 견본 문구가 남아 있으면 내 자료가 아니라 예시로 만든 것이다
+    SAMPLES = ("홍길동", "길동컨설팅", "4,000회", "200회 이상 출강", "12년차")
+    dirty = sorted({n for n, t in texts.items() if any(x in t for x in SAMPLES)})
+    checks.append(("스킬에 견본 문구가 안 남아 있다 (내 것으로 덮어썼다는 근거)",
+                   not dirty,
+                   "정상" if not dirty else
+                   "견본이 남은 스킬: " + ", ".join(dirty) + " — 카드 P18 을 다시 돌리세요"))
+
+    made = [f for f in (ROOT / "workspace" / "결과물").glob("*") if f.is_file()]
+    bad = []
+    for f in made:
+        try:
+            t = f.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        if any(x in t for x in SAMPLES):
+            bad.append(f.name)
+    checks.append(("결과물에 견본 인물·실적이 안 들어갔다", not bad,
+                   "정상" if not bad else "견본이 들어간 파일: " + ", ".join(bad[:3])))
+    return checks
+
+
 MODULES = {0: module_0, 1: module_1, 2: module_2,
-           3: module_3, 4: module_4, 5: module_5, 6: module_6}
+           3: module_3, 35: module_35, 4: module_4, 5: module_5, 6: module_6}
 
 TITLES = {0: "출발선 맞추기", 1: "직원 뽑기", 2: "일하는 방법 가르치기",
-          3: "팀으로 묶기", 4: "슬랙에서 부르기", 5: "사무실 차리기",
-          6: "전체 점검"}
+          3: "팀으로 묶기", 35: "내 자료로 실력 갖추기", 4: "슬랙에서 부르기",
+          5: "사무실 차리기", 6: "전체 점검"}
 
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in [str(i) for i in MODULES]:
-        print("사용법: py 점검.py <숫자 0~6>")
+        print("사용법: py 점검.py <숫자 0~6, 내 자료는 35>")
         print("  예)  py 점검.py 1")
         return 2
 

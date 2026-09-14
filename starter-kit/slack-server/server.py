@@ -2,7 +2,7 @@
 
 슬랙에 말을 걸면 → 이 프로그램이 받아서 → 직원(에이전트)을 깨우고 → 답을 슬랙에 올립니다.
 
-켜는 법:   py -3 server.py
+켜는 법:   py -3 -X utf8 server.py
 끄는 법:   검은 창에서 Ctrl + C
 필요한 것: 같은 폴더의 .env 파일에 슬랙 열쇠 2개
 
@@ -16,6 +16,20 @@ import logging
 import os
 import re
 import sys
+
+# 한글이 깨지지 않게 콘솔·로그를 UTF-8 로 맞춘다. 점검.py·slack_check.py 는 하는데
+# 이 파일만 빠져 있어서, 로그를 파일로 넘기면 한글에서 서버가 죽었다 (2026-09-14 추가).
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+    except Exception:
+        pass
+for _stream in ("stdout", "stderr"):
+    try:
+        getattr(sys, _stream).reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 from datetime import date
 from pathlib import Path
 
@@ -24,13 +38,15 @@ from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 
 from agent_channels import resolve_agent
-from claude_bridge import find_claude_cli, invoke_agent, reset_conversation
+from claude_bridge import (find_claude_cli, invoke_agent, reset_conversation,
+                           pop_notice)
 from personas import (
     PERSONAS, INTRO_ORDER, CLASS_OPENING, CLASS_CLOSING,
     get_persona, get_intro,
 )
 from roster import (
-    load_agents, owner_name, to_slack_emoji, build_aliases, match_alias,
+    load_agents, owner_name, owner_name_detail, is_hangul,
+    to_slack_emoji, build_aliases, match_alias,
     agent_from_text, intro_placeholders, describe,
 )
 
@@ -199,6 +215,98 @@ def intro_text(agent: str, audience: str) -> str:
     return f"{p['display_name']}입니다. {job}"
 
 
+# ── 슬랙으로 받은 파일 ──────────────────────────────────────────
+# 2026-09-14 신설. 슬랙 대화창에 사진·PDF·PPT 를 끌어다 놓으면 여기서 내려받아
+# workspace/받은파일/<날짜>/ 에 두고, 직원에게 그 경로를 알려준다.
+# 슬랙 앱에 files:read 권한이 있어야 한다 (매니페스트에 들어 있다).
+RECV_DIR = KIT_ROOT / "workspace" / "받은파일"
+MAX_FILE_MB = int(os.environ.get("MAX_FILE_MB", "25"))
+
+
+def _safe_name(name: str) -> str:
+    """파일 이름에서 폴더를 벗어나게 만드는 글자를 뺀다."""
+    name = os.path.basename(name or "파일")
+    name = re.sub(r"[^0-9A-Za-z가-힣._ ()\-]", "_", name).strip(". ")
+    return name[:120] or "파일"
+
+
+def _download_one(url: str, dest: Path) -> None:
+    """봇 토큰으로 인증해서 내려받는다. 슬랙 파일은 로그인 없이는 못 받는다."""
+    import urllib.request
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        # files:read 권한이 없으면 슬랙은 오류 대신 "로그인 하세요" HTML 을 내려준다.
+        # 그대로 저장하면 사진 대신 웹페이지가 저장돼 원인을 찾기 어렵다 (2026-09-14).
+        ctype = (r.headers.get("Content-Type") or "").lower()
+        if "text/html" in ctype:
+            raise PermissionError("files:read 권한이 없습니다 (슬랙이 로그인 화면을 돌려줌)")
+        with dest.open("wb") as f:
+            while True:
+                chunk = r.read(1 << 16)
+                if not chunk:
+                    break
+                f.write(chunk)
+
+
+async def save_slack_files(event: dict) -> tuple[list, list]:
+    """(저장한 경로들, 못 받은 것들). 못 받은 건 조용히 넘기지 않고 슬랙에 알린다."""
+    files = event.get("files") or []
+    if not files:
+        return [], []
+    failed: list = []
+    day = date.today().isoformat()
+    out_dir = RECV_DIR / day
+    saved: list[Path] = []
+    for f in files:
+        name = _safe_name(f.get("name") or f.get("title") or "파일")
+        size_mb = (f.get("size") or 0) / (1024 * 1024)
+        if size_mb > MAX_FILE_MB:
+            log.warning("파일이 너무 큽니다(%.1fMB > %dMB): %s", size_mb, MAX_FILE_MB, name)
+            failed.append(f"{name} (너무 큽니다 {size_mb:.0f}MB, {MAX_FILE_MB}MB 까지)")
+            continue
+        url = f.get("url_private_download") or f.get("url_private")
+        if not url:
+            log.warning("내려받을 주소가 없습니다: %s", name)
+            failed.append(f"{name} (내려받을 주소가 없습니다)")
+            continue
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dest = out_dir / name
+        n = 1
+        while dest.exists():                      # 같은 이름이면 (2), (3) 을 붙인다
+            dest = out_dir / f"{Path(name).stem}({n}){Path(name).suffix}"
+            n += 1
+        try:
+            await asyncio.to_thread(_download_one, url, dest)
+            saved.append(dest)
+            log.info("파일 저장: %s (%.1fMB)", dest, size_mb)
+        except Exception as e:                    # noqa: BLE001
+            if dest.exists():
+                try:
+                    dest.unlink()          # 반쯤 받다 만 파일을 남기지 않는다
+                except Exception:
+                    pass
+            log.warning("파일 저장 실패(%s): %s — 슬랙 앱에 files:read 권한이 있는지 보세요",
+                        type(e).__name__, name)
+            failed.append(f"{name} (못 받았습니다 — 슬랙 앱에 files:read 권한이 있는지 보세요)")
+    return saved, failed
+
+
+def refresh_owner_name() -> None:
+    """메시지가 올 때마다 이름을 다시 읽는다.
+
+    예전에는 서버를 켤 때 한 번만 읽어서, 대표가 이름을 정정해도 서버를 껐다 켜기 전까지
+    틀린 이름으로 계속 불렀다 (2026-09-14 수정).
+    파일·설정에서 이름을 찾았을 때만 바꾼다 — 슬랙 프로필에서 얻은 이름을 지우지 않기 위해.
+    """
+    global OWNER_NAME, OWNER_NAME_SRC
+    name, src, problem = owner_name_detail(KIT_ROOT)
+    if name and name != OWNER_NAME:
+        log.info("대표 이름 갱신: %s (출처: %s)", name, src)
+        OWNER_NAME, OWNER_NAME_SRC = name, src
+    if problem:
+        log.info("대표 이름 확인: %s", problem)
+
+
 def pick_agent(channel_name: str, text: str) -> str:
     """누가 받을지. ① 문장 앞의 이름(@교아니수석 / 교아니수석 불러서 / 교아니수석아)
     ② 채널 이름(#교아니수석 · #staff2) ③ agent_channels.py 표 ④ 기본 직원."""
@@ -224,7 +332,7 @@ def explain_failure(e: BaseException) -> str:
                 "일이 큰 경우입니다. 더 작게 쪼개서 다시 시켜보세요.")
     if "connection" in msg.lower() or "connect" in name.lower():
         return ("🔌 Claude 와 연결이 끊겼습니다.\n"
-                "검은 창을 껐다 켜보세요 (Ctrl+C 후 `py -3 server.py`).")
+                "검은 창을 껐다 켜보세요 (Ctrl+C 후 `py -3 -X utf8 server.py`).")
     return f"❌ 오류가 났습니다: {name}\n자세한 내용은 slack-server/logs/server.log 에 있습니다."
 
 
@@ -276,13 +384,18 @@ async def roll_call(client, channel_id: str, user_id: str, audience: str = "boss
 # ── 메시지 처리 ─────────────────────────────────────────────
 @app.event("message")
 async def on_message(event, client, say):
-    if event.get("subtype") or event.get("bot_id"):
+    # 파일을 올린 메시지는 subtype 이 file_share 다. 예전에는 여기서 통째로 버려서
+    # 슬랙에 사진·PDF 를 넣어도 직원이 아무 반응을 안 했다 (2026-09-14 수정).
+    if event.get("bot_id"):
         return  # 봇이 자기 말에 반응하지 않게
+    if event.get("subtype") and event.get("subtype") != "file_share":
+        return
 
     text = (event.get("text") or "").strip()
     user_id = event.get("user", "")
     channel_id = event.get("channel", "")
-    if not text:
+    has_files = bool(event.get("files"))
+    if not text and not has_files:
         return
 
     channel_type = event.get("channel_type", "")
@@ -317,6 +430,23 @@ async def on_message(event, client, say):
         await post_as_agent(client, channel_id, INTRO_ORDER[0] if INTRO_ORDER else "staff1",
                             f"새 대화로 시작합니다. {who}, 무엇을 도와드릴까요?")
         return
+
+    refresh_owner_name()
+
+    # 슬랙에 올린 사진·PDF·PPT 를 내려받아 직원이 열어볼 수 있게 한다.
+    saved, failed = await save_slack_files(event)
+    if failed:
+        await client.chat_postMessage(
+            channel=channel_id,
+            text="이 파일은 못 받았어요: " + ", ".join(failed))
+    if saved:
+        rows = "\n".join(f"  - {q}" for q in saved)
+        head = "[슬랙으로 받은 파일 — 아래 경로를 직접 열어 읽고 처리한다]"
+        if text:
+            text = f"{text}\n\n{head}\n{rows}"
+        else:
+            text = (f"{head}\n{rows}\n\n"
+                    "파일을 열어 읽고, 무엇인지 한 줄로 알려준 뒤 무엇을 해드릴지 묻는다.")
 
     agent = pick_agent(channel_name, text)
     log.info("전달: 채널=%s 직원=%s 내용=%r", channel_name or "DM", agent, text[:60])
@@ -358,6 +488,11 @@ async def on_message(event, client, say):
             interim_task.cancel()
         bubbles = split_reply(reply) or [(None, "(빈 응답)")]
         await drop_ack()
+        # 대화가 끊겨 새로 시작했으면 조용히 넘어가지 않고 한 줄 알린다.
+        # 예전에는 로그에만 남아서, 대표에게는 "갑자기 기억을 잃은" 것으로 보였다 (2026-09-14).
+        notice = pop_notice()
+        if notice:
+            await post_as_agent(client, channel_id, agent, notice)
         for who, body in bubbles:
             await post_as_agent(client, channel_id, who or agent, body[:3800])
             await asyncio.sleep(0.4)  # 대화처럼 보이게
@@ -420,8 +555,13 @@ async def resolve_owner_name() -> None:
         info = await app.client.users_info(user=OWNER_USER_ID)
         u = info.get("user") or {}
         name = (u.get("real_name") or (u.get("profile") or {}).get("display_name") or "").strip()
-        if name:
+        # 로마자 프로필 이름(예: "Sunsim ok")을 그대로 쓰면 직원이 한글로 옮기다가
+        # 엉뚱한 이름을 지어낸다. 한글 이름일 때만 쓴다 (2026-09-14).
+        if name and is_hangul(name):
             OWNER_NAME, OWNER_NAME_SRC = name[:20], "슬랙 프로필"
+        elif name:
+            log.info("슬랙 프로필 이름 '%s' 는 한글이 아니라 쓰지 않습니다 — "
+                     "facts.md 의 '- 이름:' 줄이나 .env 의 OWNER_NAME 을 채우세요", name)
     except Exception as e:
         log.info("슬랙 프로필에서 이름을 못 읽었습니다(%s) — facts.md 의 '이름:' 줄을 채우면 됩니다",
                  type(e).__name__)
@@ -463,4 +603,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n  서버를 껐습니다. 다시 켜려면  py -3 server.py\n")
+        print("\n  서버를 껐습니다. 다시 켜려면  py -3 -X utf8 server.py\n")

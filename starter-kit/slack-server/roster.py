@@ -55,9 +55,44 @@ def load_agents(kit_root: Path) -> dict[str, dict]:
     return out
 
 
+# ── 파일 읽기 (인코딩 자동) ────────────────────────────────────
+def read_text_smart(path) -> tuple[str, str]:
+    """(본문, 인코딩). UTF-8 → CP949 순으로 시도한다.
+
+    메모장에서 '인코딩: ANSI' 로 저장하면 CP949 가 된다. 그걸 UTF-8 로만 읽으면
+    한글이 통째로 깨져(`�`) '이름' 이라는 라벨조차 못 찾는다.
+    2026-09-14 신설 — 강의장에서 직원이 대표를 남의 이름으로 부른 사고의 1차 원인.
+    """
+    try:
+        raw = Path(path).read_bytes()
+    except Exception:
+        return "", ""
+    for enc in ("utf-8-sig", "cp949"):
+        try:
+            return raw.decode(enc), enc
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace"), "깨짐"
+
+
+def looks_broken(text: str) -> bool:
+    """읽다 실패한 흔적(U+FFFD)이 섞여 있는가."""
+    return "�" in text
+
+
+def is_hangul(text: str) -> bool:
+    """한글 글자가 하나라도 있는가. 로마자 프로필 이름을 걸러내는 데 쓴다."""
+    return any("가" <= ch <= "힣" for ch in text)
+
+
 # ── 대표 이름 ──────────────────────────────────────────────────
-_NAME_LINE = re.compile(r"^\s*[-*]?\s*(?:내\s*이름|대표\s*이름|이름|대표)\s*[:：]\s*(.+?)\s*$")
-_PLACEHOLDER_NAMES = {"홍길동", "[홍길동]", "이름", "내 이름", "대표", "○○○", "ooo"}
+# 볼드(**이름**:) · 표( | 이름 | 값 | ) · 머리글 기호 여러 개도 읽는다.
+# 카드 P1 이 형식을 강제하지 않아 모델이 볼드나 표로 써 버리는 일이 실제로 있었다.
+_NAME_LINE = re.compile(
+    r"^\s*[|\-*#>\s]*\**\s*(?:내\s*이름|대표\s*이름|이름|대표)\s*\**\s*[:：|]\s*(.+?)\s*\|?\s*$"
+)
+_PLACEHOLDER_NAMES = {"홍길동", "[홍길동]", "이름", "내 이름", "대표", "○○○", "ooo",
+                      "확인 필요", "미정", "없음", "-"}
 
 
 def _clean_name(v: str) -> str:
@@ -68,36 +103,58 @@ def _clean_name(v: str) -> str:
     return v[:20]
 
 
-def owner_name(kit_root: Path) -> tuple[str, str]:
-    """(이름, 출처). 못 찾으면 ('', '')."""
+def owner_name_detail(kit_root) -> tuple[str, str, str]:
+    """(이름, 출처, 문제 한 줄). 문제가 없으면 셋째 값은 빈 문자열.
+
+    순서: .env 의 OWNER_NAME → workspace/memory/facts.md 의 '이름:' 줄.
+    .env 를 먼저 보는 이유 — 사람이 직접 친 값이라 깨질 일도, 형식이 어긋날 일도 없다.
+    """
     env = os.environ.get("OWNER_NAME", "").strip().strip("\"'")
     if env:
-        return env[:20], ".env OWNER_NAME"
+        v = _clean_name(env)
+        if v:
+            return v, ".env OWNER_NAME", ""
+
     facts = Path(kit_root) / "workspace" / "memory" / "facts.md"
-    if facts.is_file():
-        try:
-            lines = facts.read_text(encoding="utf-8-sig", errors="replace").splitlines()
-        except Exception:
-            lines = []
-        in_boss = False
-        first_any = ""
-        for line in lines:
-            if line.startswith("#"):
-                in_boss = "대표" in line
-                continue
-            m = _NAME_LINE.match(line)
-            if not m:
-                continue
-            v = _clean_name(m.group(1))
-            if not v:
-                continue
-            if in_boss:
-                return v, "facts.md"
-            if not first_any:
-                first_any = v
-        if first_any:
-            return first_any, "facts.md"
-    return "", ""
+    if not facts.is_file():
+        return "", "", "workspace/memory/facts.md 가 없습니다 (카드 P1 을 먼저 하세요)"
+
+    text, enc = read_text_smart(facts)
+    if enc == "깨짐" or looks_broken(text):
+        return "", "facts.md", ("facts.md 의 한글이 깨져 읽히지 않습니다 — 메모장에서 열어 "
+                                "'다른 이름으로 저장' → 인코딩을 UTF-8 로 바꿔 덮어쓰세요")
+
+    note = ""
+    if enc == "cp949":
+        note = ("facts.md 가 ANSI(CP949)로 저장돼 있습니다. 지금은 읽히지만 "
+                "UTF-8 로 다시 저장해 두세요")
+
+    in_boss = False
+    first_any = ""
+    for line in text.splitlines():
+        if line.startswith("#"):
+            in_boss = "대표" in line
+            continue
+        m = _NAME_LINE.match(line)
+        if not m:
+            continue
+        v = _clean_name(m.group(1))
+        if not v:
+            continue
+        if in_boss:
+            return v, "facts.md", note
+        if not first_any:
+            first_any = v
+    if first_any:
+        return first_any, "facts.md", note
+    return "", "facts.md", ("facts.md 에서 이름 줄을 못 찾았습니다 — '- 이름: 내이름' 처럼 "
+                            "한 줄로 적으세요 (카드 P1)")
+
+
+def owner_name(kit_root) -> tuple[str, str]:
+    """(이름, 출처). 못 찾으면 ('', '')."""
+    name, src, _ = owner_name_detail(kit_root)
+    return name, (src if name else "")
 
 
 # ── 이모지 ────────────────────────────────────────────────────

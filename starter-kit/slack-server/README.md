@@ -43,7 +43,7 @@ irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/update.ps1
 ## 켜는 법 (모듈 4에서 같이 합니다)
 
 ```
-py -3 server.py
+py -3 -X utf8 server.py
 ```
 
 `npm` 이 아니라 `py` 입니다. 이 프로그램은 파이썬으로 돌아갑니다.

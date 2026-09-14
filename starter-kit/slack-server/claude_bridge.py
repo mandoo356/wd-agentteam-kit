@@ -26,7 +26,8 @@ from claude_agent_sdk import (
     ResultMessage,
 )
 
-from roster import load_agents, owner_name, describe
+from roster import (load_agents, owner_name, describe,
+                    read_text_smart, looks_broken)
 
 log = logging.getLogger("agent.bridge")
 
@@ -53,7 +54,13 @@ AGENT_BODY_LIMIT = int(os.environ.get("AGENT_BODY_LIMIT", "3000"))
 AGENT_MODEL = os.environ.get("AGENT_MODEL", "sonnet").strip()
 # 한 대화에 이만큼 주고받으면 서버가 스스로 "새 대화"를 한다. 뒤로 갈수록 느려지고
 # 앞 직원의 정체성이 섞이는 것을 막는다. 결과물은 파일·inbox 에 남으니 실무 손해는 작다.
-SESSION_MAX_TURNS = int(os.environ.get("SESSION_MAX_TURNS", "30"))
+SESSION_MAX_TURNS = int(os.environ.get("SESSION_MAX_TURNS", "60"))
+# 직원이 무슨 일을 했는지 한 줄씩 남기는 업무일지. 대화가 새로 시작돼도 이 파일은 남고,
+# 새 대화의 프롬프트 맨 앞에 최근 몇 줄이 들어간다 — 사람 팀이 업무일지를 읽고
+# 하루를 시작하는 것과 같다. 2026-09-14 신설(대화가 3시간·60턴에 끊겨도 일은 이어지게).
+WORKLOG_FILE = KIT_ROOT / "workspace" / "기록" / "작업일지.md"
+WORKLOG_LINES = int(os.environ.get("WORKLOG_LINES", "6"))          # 어제 이전 것에서 몇 줄
+WORKLOG_TODAY_MAX = int(os.environ.get("WORKLOG_TODAY_MAX", "40"))  # 오늘 것은 최대 몇 줄
 # 팀 규약(facts.md)을 프롬프트에 넣을 때 상한
 FACTS_LIMIT = int(os.environ.get("FACTS_LIMIT", "3000"))
 
@@ -92,12 +99,55 @@ class AgentPool:
         self._client: Optional[ClaudeSDKClient] = None
         self._lock = asyncio.Lock()
         self._connect_lock = asyncio.Lock()
+        self._notice = ""  # 대화가 끊겼을 때 슬랙에 한 줄 알릴 말 (server.py 가 가져간다)
         self._session_id: Optional[str] = self._load_session()
         self._turns = 0  # 이 세션에서 주고받은 횟수 (SESSION_MAX_TURNS 넘으면 새 대화)
 
-    # ---- 대화 기억 ---------------------------------------------------------
+    # ---- 끊김 알림 ---------------------------------------------------------
+    def pop_notice(self) -> str:
+        """대화가 새로 시작됐으면 그 사실을 한 번만 돌려준다. 조용히 잊지 않게."""
+        n, self._notice = self._notice, ""
+        return n
+
+    # ---- 업무일지 ----------------------------------------------------------
     @staticmethod
-    def _load_session() -> Optional[str]:
+    def worklog_text(limit: int = 0) -> str:
+        """**오늘 한 일 전부** + 그 앞의 몇 줄. 대화가 끊겨도 이건 파일로 남는다.
+
+        대화 자체는 3시간이면 끊긴다(옛 답을 다시 내놓던 사고 때문에 일부러 짧게 잡은 값).
+        오전에 한 일을 오후에 아는 근거는 대화가 아니라 이 일지다 — 그래서 오늘 줄은
+        개수와 상관없이 전부 넣고, 어제 이전 것은 몇 줄만 붙인다. 2026-09-14.
+        """
+        limit = limit or WORKLOG_LINES
+        try:
+            lines = [x for x in read_text_smart(WORKLOG_FILE)[0].splitlines() if x.strip()]
+        except Exception:
+            lines = []
+        if not lines:
+            return "  (아직 기록 없음)"
+        today = time.strftime("%Y-%m-%d")
+        todays = [x for x in lines if today in x][-WORKLOG_TODAY_MAX:]
+        older = [x for x in lines if today not in x][-limit:]
+        picked = (older + todays) if todays else lines[-limit:]
+        return "\n".join("  " + x for x in picked)
+
+    @staticmethod
+    def append_worklog(who: str, asked: str, answered: str) -> None:
+        """한 건 끝날 때마다 한 줄. 길면 자른다."""
+        def cut(t: str, n: int) -> str:
+            t = " ".join((t or "").split())
+            return t[:n] + ("…" if len(t) > n else "")
+        line = (f"- {time.strftime('%Y-%m-%d %H:%M')} {who}: "
+                f"{cut(asked, 45)} → {cut(answered, 70)}")
+        try:
+            WORKLOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with WORKLOG_FILE.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except Exception as e:
+            log.warning("업무일지 기록 실패: %s", e)
+
+    # ---- 대화 기억 ---------------------------------------------------------
+    def _load_session(self) -> Optional[str]:
         try:
             d = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
         except Exception:
@@ -108,6 +158,8 @@ class AgentPool:
         age = time.time() - ts
         if age > SESSION_MAX_AGE_SEC:
             log.info("저장된 대화가 %.0f시간 전 것이라 새로 시작합니다", age / 3600)
+            self._notice = (f"({age / 3600:.0f}시간 만이라 새 대화로 시작합니다. "
+                            "지난 기록은 workspace/기록/작업일지.md 에 있어요)")
             return None
         log.info("직전 대화를 이어받습니다 (%.0f분 전)", age / 60)
         return sid
@@ -187,6 +239,7 @@ class AgentPool:
                 # 저장된 대화가 깨졌을 수 있다. 그것 때문에 서버 전체가 못 뜨면
                 # 안 되니 대화를 버리고 한 번 더 시도한다.
                 log.warning("대화 이어받기 실패(%s) — 새 대화로 시작합니다", type(e).__name__)
+                self._notice = "(지난 대화를 못 불러와 새로 시작합니다. 한 일은 작업일지에 남아 있어요)"
                 self.forget_session()
                 client = ClaudeSDKClient(options=self._make_options())
                 await client.connect()
@@ -238,10 +291,15 @@ class AgentPool:
         예전엔 "먼저 facts.md 를 읽어라"고 시켜서 메시지마다 모델이 파일을 읽으러 한 번씩
         왕복했다(2026-09-08 속도 개선). 지금은 여기서 읽어 주고, 모델은 바로 답한다."""
         p = KIT_ROOT / "workspace" / "memory" / "facts.md"
-        try:
-            t = p.read_text(encoding="utf-8-sig", errors="replace").strip()
-        except Exception:
+        if not p.is_file():
             return "(facts.md 없음 — 카드 P1 로 만든다)"
+        # ANSI(CP949)로 저장된 파일을 UTF-8 로만 읽으면 한글이 통째로 깨진 채
+        # 프롬프트에 들어간다. 2026-09-14 부터 인코딩을 자동으로 맞춘다.
+        t, enc = read_text_smart(p)
+        t = t.strip()
+        if enc == "깨짐" or looks_broken(t):
+            return ("(facts.md 의 한글이 깨져 읽지 못했습니다. 내용을 아는 척하지 말고, "
+                    "대표에게 'facts.md 를 UTF-8 로 다시 저장해 주세요' 라고 알린다)")
         if len(t) > FACTS_LIMIT:
             t = t[:FACTS_LIMIT] + "\n…(이하 생략 — 전문은 workspace/memory/facts.md)"
         return t or "(facts.md 비어 있음)"
@@ -259,10 +317,7 @@ class AgentPool:
             return "  (쪽지 없음)"
         rows = []
         for p in files[:limit]:
-            try:
-                body = p.read_text(encoding="utf-8-sig", errors="replace").strip()
-            except Exception:
-                body = ""
+            body = read_text_smart(p)[0].strip()
             if len(body) > each:
                 body = body[:each] + " …"
             rows.append(f"  - {p.name}: {body}")
@@ -270,18 +325,30 @@ class AgentPool:
             rows.append(f"  (외 {len(files) - limit}개 — workspace/inbox/{agent}/)")
         return "\n".join(rows)
 
+    def _display_name(self, agent: str) -> str:
+        """업무일지·알림에 쓸 사람 이름. 표시 이름 → 직원 파일 name → 키 순."""
+        try:
+            personas = self._personas()
+            agents = load_agents(KIT_ROOT)
+            return (personas.get(agent, {}).get("display_name")
+                    or agents.get(agent, {}).get("name") or agent)
+        except Exception:
+            return agent
+
     def build_prompt(self, agent: str, user_message: str,
                      speaker_name: str = "") -> str:
         agents = load_agents(KIT_ROOT)
         personas = self._personas()
         disp = personas.get(agent, {}).get("display_name") or agents.get(agent, {}).get("name") or agent
+        # 이름은 **매 요청마다 파일에서 다시 읽은 값**이 이긴다.
+        # 예전에는 서버를 켤 때 한 번 읽은 값(speaker_name)이 이겨서, 대표가 슬랙에서
+        # 이름을 정정해도 서버를 껐다 켜기 전까지 틀린 이름이 계속 들어갔다(2026-09-14 수정).
         boss, _src = owner_name(KIT_ROOT)
-        boss = speaker_name or boss
+        boss = boss or speaker_name
         if boss:
             who = f"{boss} — 이 회사의 대표 본인"
         else:
-            who = ("이 회사의 대표 본인 (이름은 workspace/memory/facts.md 의 '이름:' 에 있다. "
-                   "없으면 '대표님' 이라고 부른다)")
+            who = "이 회사의 대표 본인 (이름을 아직 모른다)"
         body = (agents.get(agent, {}).get("body") or "").strip()
         if len(body) > AGENT_BODY_LIMIT:
             body = body[:AGENT_BODY_LIMIT] + f"\n…(이하 생략 — 전문은 .claude/agents/{agent}.md)"
@@ -291,6 +358,9 @@ class AgentPool:
             "[슬랙으로 온 요청]",
             f"말을 거는 사람: {who}. 이 사람을 다른 이름·다른 사람으로 부르지 않는다. "
             "이름을 정정해 주면 그 이름으로 부르고 facts.md 의 '이름:' 줄에 반영한다.",
+            ("위에 이름이 없으면 **'대표님' 이라고만 부른다.** 이름을 추측하거나 지어내지 않는다. "
+             "글자가 깨져 보여도 거기서 이름을 복원하려 하지 않는다. "
+             "이름이 필요하면 '제가 대표님 성함을 아직 모릅니다. 알려주시겠어요?' 라고 한 줄로 묻는다."),
             f"기본 담당: {disp} ({agent})",
             "",
             "[우리 팀 명단 — 답할 때 쓰는 이름은 왼쪽 표시 이름 그대로]",
@@ -305,6 +375,9 @@ class AgentPool:
             f"[내 inbox — workspace/inbox/{agent}/ 에 온 쪽지. 다시 읽으러 가지 않는다]",
             self._inbox_text(agent),
             "",
+            "[최근에 우리 팀이 한 일 — 업무일지 workspace/기록/작업일지.md]",
+            self.worklog_text(),
+            "",
             "[일하는 규칙]",
             "- 위 팀 규약과 inbox 는 이미 읽은 것으로 친다 (다시 읽지 않는다). 인사·질문·짧은 답은 도구 없이 바로 답한다. "
             "캘린더·메일·파일을 실제로 봐야 하는 일은 도구를 쓰고 결과까지 답한다 — '확인 중이에요' 같은 미완의 말로 끝내지 않는다.",
@@ -314,7 +387,7 @@ class AgentPool:
             "결과를 그 직원 이름으로 보고한다. 작은 답은 바로 그 직원 이름으로 한다.",
             "- 산출물은 workspace/결과물/ 에 파일로 저장한다. 다른 직원이 이어받아야 하면 "
             "workspace/inbox/<상대키>/ 에 쪽지를 남긴다.",
-            "- 모르는 금액·날짜·고객사 이름은 지어내지 않는다.",
+            "- 모르는 금액·날짜·고객사 이름·사람 이름은 지어내지 않는다. 모르면 모른다고 하고 묻는다.",
             "",
             "[답하는 방식 — 지킬 것]",
             f"- 카톡처럼 한 줄에 한 마디. 모든 줄을 '표시이름: 내용' 형태로 쓴다. 예) {disp}: 착수했어요",
@@ -337,17 +410,24 @@ class AgentPool:
         async with self._lock:
             if SESSION_MAX_TURNS > 0 and self._turns >= SESSION_MAX_TURNS:
                 log.info("대화가 %d번을 넘어 새 대화로 시작합니다 (SESSION_MAX_TURNS)", self._turns)
+                self._notice = (f"(대화가 {self._turns}번을 넘어 새로 시작합니다. "
+                                "한 일은 workspace/기록/작업일지.md 에 남겨 뒀어요)")
                 self.forget_session()
                 await self.close()
                 self._turns = 0
             self._turns += 1
+            who = self._display_name(agent)
             try:
-                return await self._do_query(prompt, timeout_sec)
+                out = await self._do_query(prompt, timeout_sec)
+                self.append_worklog(who, user_message, out)
+                return out
             except Exception as e:
                 log.warning("첫 시도 실패(%s) — 다시 붙어서 한 번 더 해봅니다", type(e).__name__)
                 try:
                     await self._reconnect()
-                    return await self._do_query(prompt, RETRY_TIMEOUT_SEC)
+                    out = await self._do_query(prompt, RETRY_TIMEOUT_SEC)
+                    self.append_worklog(who, user_message, out)
+                    return out
                 except Exception:
                     # 의심스러운 연결을 다음 요청에 넘기지 않는다.
                     await self.close()
@@ -399,6 +479,11 @@ async def invoke_agent(agent: str, user_message: str, workspace: Path,
     pool = get_pool(workspace, cli_path)
     return await pool.query_agent(agent, user_message, timeout_sec=timeout_sec,
                                   speaker_name=speaker_name)
+
+
+def pop_notice() -> str:
+    """대화가 새로 시작됐으면 그 사실을 한 번만 돌려준다 (server.py 가 슬랙에 한 줄 올린다)."""
+    return _pool.pop_notice() if _pool else ""
 
 
 async def reset_conversation(workspace: Path, cli_path: str) -> None:

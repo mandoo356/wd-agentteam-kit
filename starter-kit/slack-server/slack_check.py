@@ -71,6 +71,18 @@ def main() -> int:
         me = WebClient(token=bot).auth_test()
         team = me.get("team") or "내 워크스페이스"
         print(f"OK 봇 토큰(xoxb-) 통과 — 워크스페이스 '{team}', 봇 이름 '{me.get('user', 'AI')}'")
+        # 2026-09-14: 슬랙으로 받은 사진·PDF 를 직원이 읽으려면 files:read 권한이 있어야 한다.
+        # 권한 목록은 응답 헤더에 들어 온다. 없으면 앱을 다시 설치해야 한다.
+        try:
+            granted = (me.headers or {}).get("x-oauth-scopes", "")
+        except Exception:
+            granted = ""
+        if granted:
+            if "files:read" in granted:
+                print("OK 파일 읽기 권한(files:read) 있음 — 슬랙에 사진·PDF 를 넣으면 직원이 읽습니다")
+            else:
+                print("NG 파일 읽기 권한(files:read)이 없습니다 — 슬랙 앱 설정(App Manifest)에 "
+                      "files:read 를 넣고 Install to Workspace 를 다시 누르세요")
     except SlackApiError as e:
         err = e.response.get("error", "") if getattr(e, "response", None) else str(e)
         if err in ("invalid_auth", "not_authed", "account_inactive", "token_revoked"):

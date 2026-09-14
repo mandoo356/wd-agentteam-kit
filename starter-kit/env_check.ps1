@@ -615,8 +615,21 @@ function Fix-Slack {
         if ($owner -match '^[UW][A-Z0-9]{8,}$') { break }
         Write-Warn 'U 로 시작하는 9자 이상 영문·숫자여야 합니다 (이메일·이름이 아니라 "멤버 ID 복사" 값)'
     }
+    # ④ 내 이름 — 2026-09-14 추가.
+    # 직원이 대표를 남의 이름으로 부른 사고의 근본 해결책. 사람이 직접 친 값이라
+    # 파일이 깨질 일도, 슬랙의 영문 프로필 이름을 잘못 옮길 일도 없다.
+    $ownerName = ''
+    while ($true) {
+        $ownerName = (Read-Host '  ? ④ 내 이름 OWNER_NAME — 직원들이 나를 부를 이름 (한글, 예: 홍길동)').Trim().Trim('"').Trim("'")
+        if (-not $ownerName) { Write-Warn '이름이 없으면 직원이 나를 "대표님" 이라고만 부릅니다. 그래도 되면 한 번 더 Enter.'
+                               $ownerName = (Read-Host '  ? ④ 내 이름 (그냥 Enter 치면 건너뜁니다)').Trim()
+                               if (-not $ownerName) { break } }
+        if ($ownerName -match '[가-힣]') { break }
+        Write-Warn '한글 이름으로 적어 주세요. 영문 이름은 직원이 한글로 옮기다 틀립니다.'
+    }
     $body = "# 슬랙 열쇠 — 환경점검이 $([DateTime]::Now.ToString('yyyy-MM-dd HH:mm')) 에 저장. 비밀번호와 같습니다. 남에게 주지 마세요.`n" +
             "SLACK_BOT_TOKEN=$bot`nSLACK_APP_TOKEN=$appT`nOWNER_USER_ID=$owner`n"
+    if ($ownerName) { $body += "OWNER_NAME=$ownerName`n" }
     try {
         [IO.File]::WriteAllText($envf, $body, (New-Object System.Text.UTF8Encoding($false)))   # BOM 없이
         Write-Info ".env 저장됨 (BOM 없음): $envf"
@@ -669,7 +682,7 @@ function Test-Server {
     }
     $agents = @(Get-ChildItem (Join-Path $KIT '.claude\agents') -Filter '*.md' -ErrorAction SilentlyContinue).Count
     if ($ok -and $agents -eq 0) { $d += ' — 직원은 아직 0명(모듈 1에서 만듭니다)' }
-    Set-Result 'server' '슬랙 서버 첫 기동 (준비 완료)' '필수' $ok $d 'slack-server 폴더에서 py -3 server.py 를 켜고 메시지를 읽으세요'
+    Set-Result 'server' '슬랙 서버 첫 기동 (준비 완료)' '필수' $ok $d 'slack-server 폴더에서 py -3 -X utf8 server.py 를 켜고 메시지를 읽으세요'
 }
 
 function Fix-OptionalLogins {
