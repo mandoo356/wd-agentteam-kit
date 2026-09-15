@@ -81,11 +81,14 @@ if ($env:WD_NO_KILL) {
 #   내가 고치는 파일(personas.py · agent_channels.py · .env · 직원 · 스킬)은 이 목록에 없다.
 $files = @(
     'slack-server/server.py',
+    'slack-server/slack_check.py',
+    'slack-server/test_join_request.py',
     'slack-server/claude_bridge.py',
     'slack-server/roster.py',
     'slack-server/README.md',
     '점검.py',
     '프롬프트카드.md',
+    '프롬프트카드_전문스킬.md',
     'README.md',
     'mail/mail_common.py',
     'mail/mail_check.py',
