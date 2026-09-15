@@ -96,7 +96,9 @@ $files = @(
     'mail/mail_send.py',
     'mail/README.md',
     'mail/.env.example',
-    'mail/skill/SKILL.md'
+    'mail/skill/SKILL.md',
+    'naver-blog/naver_draft.py',
+    'naver-blog/README.md'
 )
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $bak   = Join-Path $Kit "backup\update-$stamp"
