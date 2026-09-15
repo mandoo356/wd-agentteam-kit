@@ -360,6 +360,117 @@ def is_team_intro(text: str) -> bool:
     return any(t in low for t in TEAM_TRIGGERS)
 
 
+# ── 채널 입장 ───────────────────────────────────────────────
+# 2026-09-15 신설. 그전에는 "#소셜 채널에 들어가" 라고 해도 그 말이 그대로 직원에게
+# 넘어갔고, 직원은 슬랙 API 를 쓸 수 없으니 "권한이 없습니다" 같은 말을 지어냈다.
+# 실제로 필요한 건 conversations.join 호출이다 — 권한(channels:join)과 이 코드가
+# 둘 다 있어야 동작한다. 권한만 넣고 재설치해도 코드가 없으면 아무 일도 안 일어난다.
+# 비공개 채널은 권한이 있어도 봇이 스스로 못 들어간다 (슬랙 자체 제약). 사람이 /invite 해야 한다.
+MISSING_JOIN_SCOPE = (
+    "채널에 들어갈 권한(channels:join)이 없습니다. 권한을 넣고 *다시 설치* 하셔야 합니다.\n"
+    "① api.slack.com/apps → 내 앱 → *OAuth & Permissions*\n"
+    "② Bot Token Scopes 에 `channels:join` 추가\n"
+    "③ 맨 위 *Reinstall to Workspace* 클릭 ← 이걸 빼먹으면 권한이 안 붙습니다\n"
+    "④ 이 창을 껐다가 다시 켜 주세요")
+
+JOIN_WORDS = ("들어가", "들어와", "입장", "조인", "join")
+JOIN_RE = re.compile(
+    r"(?:#|채널\s*)?([0-9A-Za-z가-힣_\-]{1,40})\s*(?:채널)?\s*(?:에|에다)?\s*"
+    r"(?:들어가|들어와|입장|조인|join)", re.IGNORECASE)
+_NOT_A_NAME = {"채널", "에", "나", "너", "저", "우리", "거기", "여기", "그"}
+
+
+def is_join_request(text: str) -> str:
+    """채널 입장 요청이면 채널 이름을, 이름을 안 밝혔으면 '?', 아니면 '' 를 돌려준다."""
+    t = text.strip()
+    if len(t) > 30:
+        return ""
+    low = t.lower()
+    # "초대장" 같은 말에 걸리지 않게 뒤 글자를 본다
+    hit = any(w in low for w in JOIN_WORDS) or bool(re.search(r"초대(?!장|권|객|해서)", t))
+    if not hit or ("#" not in t and "채널" not in t):
+        return ""
+    m = JOIN_RE.search(t)
+    if m:
+        name = m.group(1).strip("#").strip()
+        if name and name not in _NOT_A_NAME:
+            return name
+    return "?"                      # "채널에 너가 초대해줘" 처럼 이름을 안 밝힌 경우
+
+
+async def list_channels(client) -> tuple[list, list]:
+    """(공개 채널, 비공개 채널). 슬랙은 한 번에 다 주지 않으므로 커서를 따라 끝까지 읽는다."""
+    public: list = []
+    private: list = []
+    cursor = None
+    while True:
+        r = await client.conversations_list(
+            types="public_channel,private_channel", limit=200,
+            exclude_archived=True, cursor=cursor)
+        for ch in r.get("channels") or []:
+            (private if ch.get("is_private") else public).append(ch)
+        cursor = (r.get("response_metadata") or {}).get("next_cursor") or ""
+        if not cursor:
+            return public, private
+
+
+async def join_channel(client, channel_id: str, want: str) -> None:
+    """공개 채널이면 스스로 들어간다. 안 되는 경우는 왜 안 되는지까지 말한다."""
+    try:
+        public, private = await list_channels(client)
+    except Exception as e:                                   # noqa: BLE001
+        if "missing_scope" in str(e):
+            await client.chat_postMessage(channel=channel_id, text=MISSING_JOIN_SCOPE)
+        else:
+            await client.chat_postMessage(
+                channel=channel_id,
+                text=f"채널 목록을 못 읽었습니다({type(e).__name__}). 잠시 뒤 다시 시켜 주세요.")
+        return
+
+    if want == "?":                                          # 채널 이름을 안 밝힌 경우
+        can = [c for c in public if not c.get("is_member")]
+        if can:
+            names = ", ".join("#" + c["name"] for c in can[:15])
+            tail = " …" if len(can) > 15 else ""
+            body = (f"어느 채널로 들어갈까요? 이름을 찍어 주세요 — 예) `#{can[0]['name']} 채널에 들어가`\n"
+                    f"제가 들어갈 수 있는 곳: {names}{tail}")
+        else:
+            body = "제가 들어갈 수 있는 공개 채널이 지금은 없습니다."
+        if private:
+            body += ("\n비공개 채널은 제가 스스로 못 들어갑니다. "
+                     "그 채널에서 `/invite @AI` 를 쳐 주세요.")
+        await client.chat_postMessage(channel=channel_id, text=body)
+        return
+
+    low = want.lower()
+    target = next((c for c in public if (c.get("name") or "").lower() == low), None)
+    if target is None:
+        if any((c.get("name") or "").lower() == low for c in private):
+            await client.chat_postMessage(channel=channel_id, text=(
+                f"#{want} 은 비공개 채널이라 제가 스스로 못 들어갑니다 — 슬랙이 막아 둔 겁니다.\n"
+                f"그 채널에 들어가셔서 `/invite @AI` 라고 쳐 주시면 바로 붙습니다."))
+        else:
+            await client.chat_postMessage(channel=channel_id, text=(
+                f"#{want} 이라는 채널을 못 찾았습니다. 이름을 다시 확인해 주세요."))
+        return
+
+    if target.get("is_member"):
+        await client.chat_postMessage(
+            channel=channel_id, text=f"#{want} 에는 이미 들어가 있습니다. 거기서 말 걸어 주세요.")
+        return
+
+    try:
+        await client.conversations_join(channel=target["id"])
+    except Exception as e:                                   # noqa: BLE001
+        msg = MISSING_JOIN_SCOPE if "missing_scope" in str(e) \
+            else f"#{want} 에 못 들어갔습니다({type(e).__name__})."
+        await client.chat_postMessage(channel=channel_id, text=msg)
+        return
+    log.info("채널 입장: #%s (%s)", want, target["id"])
+    await client.chat_postMessage(
+        channel=channel_id, text=f"#{want} 에 들어갔습니다. 이제 거기서 저를 부르시면 됩니다.")
+
+
 async def roll_call(client, channel_id: str, user_id: str, audience: str = "boss"):
     """직원들이 순서대로 한 명씩 인사한다."""
     is_class = audience == "class"
@@ -429,6 +540,13 @@ async def on_message(event, client, say):
         who = f"{OWNER_NAME} 대표님" if OWNER_NAME else "대표님"
         await post_as_agent(client, channel_id, INTRO_ORDER[0] if INTRO_ORDER else "staff1",
                             f"새 대화로 시작합니다. {who}, 무엇을 도와드릴까요?")
+        return
+
+    # "#소셜 채널에 들어가" 는 직원에게 넘기지 않고 여기서 슬랙 API 로 직접 처리한다.
+    joined = is_join_request(text)
+    if joined:
+        log.info("채널 입장 요청: %r", text[:40])
+        await join_channel(client, channel_id, joined)
         return
 
     refresh_owner_name()

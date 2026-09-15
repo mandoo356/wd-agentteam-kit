@@ -26,6 +26,26 @@ except Exception:
 HERE = Path(__file__).resolve().parent
 ENV = HERE / ".env"
 
+# 슬랙 앱 매니페스트(04_슬랙앱_안내문)에 적힌 권한 그대로다. 하나라도 빠지면 교육 중에 막힌다.
+# 2026-09-15: 예전에는 files:read 하나만 봤다. 그래서 channels:join·users:read 가 빠진 걸
+# 아무도 모르고 있다가 "채널에 못 들어간다"로 터졌다. 이제 14개를 전부 대조한다.
+REQUIRED_SCOPES = [
+    ("chat:write",           "직원이 말을 한다"),
+    ("chat:write.customize", "직원 이름·아이콘을 바꿔 단다"),
+    ("app_mentions:read",    "@이름 으로 부르면 듣는다"),
+    ("channels:history",     "공개 채널의 말을 읽는다"),
+    ("channels:read",        "공개 채널 목록을 본다"),
+    ("channels:join",        "공개 채널에 스스로 들어간다"),
+    ("groups:history",       "비공개 채널의 말을 읽는다"),
+    ("groups:read",          "비공개 채널 목록을 본다"),
+    ("im:history",           "1:1 대화를 읽는다"),
+    ("im:read",              "1:1 대화 목록을 본다"),
+    ("mpim:history",         "여러 명 대화를 읽는다"),
+    ("mpim:read",            "여러 명 대화 목록을 본다"),
+    ("files:read",           "올린 사진·PDF·PPT 를 연다"),
+    ("users:read",           "대표님 이름을 슬랙 프로필에서 읽는다"),
+]
+
 
 def load_env() -> dict[str, str]:
     vals: dict[str, str] = {}
@@ -71,18 +91,28 @@ def main() -> int:
         me = WebClient(token=bot).auth_test()
         team = me.get("team") or "내 워크스페이스"
         print(f"OK 봇 토큰(xoxb-) 통과 — 워크스페이스 '{team}', 봇 이름 '{me.get('user', 'AI')}'")
-        # 2026-09-14: 슬랙으로 받은 사진·PDF 를 직원이 읽으려면 files:read 권한이 있어야 한다.
-        # 권한 목록은 응답 헤더에 들어 온다. 없으면 앱을 다시 설치해야 한다.
+        # 슬랙은 발급된 권한 목록을 응답 헤더로 알려준다. 여기서 전부 대조한다 (2026-09-15).
         try:
-            granted = (me.headers or {}).get("x-oauth-scopes", "")
+            raw = (me.headers or {}).get("x-oauth-scopes", "")
         except Exception:
-            granted = ""
-        if granted:
-            if "files:read" in granted:
-                print("OK 파일 읽기 권한(files:read) 있음 — 슬랙에 사진·PDF 를 넣으면 직원이 읽습니다")
-            else:
-                print("NG 파일 읽기 권한(files:read)이 없습니다 — 슬랙 앱 설정(App Manifest)에 "
-                      "files:read 를 넣고 Install to Workspace 를 다시 누르세요")
+            raw = ""
+        granted = {s.strip() for s in raw.split(",") if s.strip()}
+        if not granted:
+            print("-- 권한 목록을 못 읽었습니다 — 서버를 켠 뒤 직접 확인해 주세요")
+        else:
+            missing = [(s, why) for s, why in REQUIRED_SCOPES if s not in granted]
+            if missing:
+                print(f"NG 슬랙 앱 권한 {len(missing)}개가 빠졌습니다:")
+                for s, why in missing:
+                    print(f"       · {s} — {why}")
+                print("   고치는 법 — 권한만 넣으면 안 되고 *다시 설치* 까지 해야 붙습니다")
+                print("     ① api.slack.com/apps → 내 앱 → OAuth & Permissions")
+                print("     ② Bot Token Scopes 에 위 권한을 추가")
+                print("     ③ 맨 위 Reinstall to Workspace 클릭 ← 이걸 빼먹으면 그대로입니다")
+                print("NG 권한이 모자랍니다 — 위 3단계를 하고 환경점검을 다시 실행하세요")
+                return 1
+            print(f"OK 슬랙 앱 권한 {len(REQUIRED_SCOPES)}개 전부 있음 "
+                  "(파일 읽기·채널 입장 포함)")
     except SlackApiError as e:
         err = e.response.get("error", "") if getattr(e, "response", None) else str(e)
         if err in ("invalid_auth", "not_authed", "account_inactive", "token_revoked"):
