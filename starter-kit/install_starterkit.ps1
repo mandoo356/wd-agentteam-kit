@@ -108,8 +108,23 @@ Write-Info "MyData 안내문: $guide"
 
 Write-Step '가벼운 스타터킷 설치'
 if (Test-Path -LiteralPath $marker) {
-    Write-Host '  ⚠ 기존 스타터킷이 있어 덮어쓰지 않았습니다.' -ForegroundColor Yellow
+    # 2026-09-16: 예전에는 "덮어쓰지 않았습니다" 한 줄만 조용히 찍고 "설치 완료" 로 끝났다.
+    # 재수강생이 이 한 줄 설치를 돌리면 엔진은 옛 판 그대로인데 성공한 줄 알고 수업에 들어왔다.
+    # 이제 무엇이 일어났는지와, 새 판으로 올리는 방법을 또렷하게 알려준다.
+    $script:KitAlreadyExisted = $true
+    Write-Host ''
+    Write-Host '  ⚠ 이미 설치돼 있습니다 — 새 판으로 바뀌지 않았습니다.' -ForegroundColor Yellow
     Write-Info $targetKit
+    Write-Host ''
+    Write-Host '     이 한 줄 설치는 처음 까는 분용입니다. 내가 만든 직원·스킬을 지키려고' -ForegroundColor Yellow
+    Write-Host '     기존 폴더는 건드리지 않습니다. 새 판으로 올리시려면 아래를 쓰세요.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '     PowerShell 창에 이 한 줄 (엔진만 바뀌고 내 직원·스킬·슬랙 열쇠는 그대로)' -ForegroundColor Cyan
+    Write-Host '     irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/update.ps1 | iex' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host '     정말 처음부터 새로 까시려면 C:\Agent\01_KIT 폴더를 지우고 다시 실행하세요.' -ForegroundColor DarkGray
+    Write-Host '     (그러면 직원·스킬·슬랙 열쇠가 전부 사라집니다)' -ForegroundColor DarkGray
+    Write-Host ''
 } else {
     $excludedDirs = @(
         (Join-Path $sourceKit 'office\node_modules'),
@@ -180,7 +195,12 @@ $logLines = @(
 $logLines | Set-Content -LiteralPath $logFile -Encoding UTF8
 
 Write-Step '설치 결과'
-Write-Host "  ✅ 표준 폴더와 스타터킷 준비됨" -ForegroundColor Green
+if ($script:KitAlreadyExisted) {
+    Write-Host "  ⚠ 기존 설치를 그대로 두었습니다 — 새 판으로 바뀌지 않았습니다" -ForegroundColor Yellow
+    Write-Host "     새 판으로 올리려면:  irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/update.ps1 | iex" -ForegroundColor Cyan
+} else {
+    Write-Host "  ✅ 표준 폴더와 스타터킷 준비됨" -ForegroundColor Green
+}
 Write-Info "스타터킷: $targetKit"
 Write-Info "기록: $logFile"
 Write-Info "내 자료: $(Join-Path $targetRoot 'MyData') — 제안서 3·블로그 3·로고 1 을 수업 전에 넣어 두세요"
