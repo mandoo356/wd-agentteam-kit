@@ -348,6 +348,35 @@ def module_3():
     return checks
 
 
+def check_sleep():
+    """윈도우 절전(대기) 설정을 읽는다. 0초 = '해당 없음' = 안 잔다.
+
+    powercfg 출력의 마지막 두 16진수가 각각 AC(전원 연결)·DC(배터리) 값이다.
+    글자는 언어마다 다르지만 숫자 자리는 같아서, 한글/영문 윈도우 모두에서 읽힌다.
+    """
+    try:
+        out = subprocess.run(
+            ["powercfg", "/q", "SCHEME_CURRENT", "SUB_SLEEP", "STANDBYIDLE"],
+            capture_output=True, text=True, timeout=15,
+            encoding="cp949", errors="ignore",
+        ).stdout
+    except Exception:
+        return True, "확인 못 함 — 넘어갑니다 (전원 설정에서 직접 '해당 없음' 인지 보세요)"
+
+    vals = re.findall(r"0x([0-9a-fA-F]{8})", out)
+    if len(vals) < 2:
+        return True, "확인 못 함 — 넘어갑니다 (전원 설정에서 직접 '해당 없음' 인지 보세요)"
+
+    ac, dc = int(vals[-2], 16), int(vals[-1], 16)
+    if ac != 0:
+        return False, (f"전원 꽂았을 때 {ac // 60}분 뒤 잠듭니다 — 검은 창에 이 한 줄: "
+                       "powercfg /change standby-timeout-ac 0")
+    if dc != 0:
+        return True, (f"정상 (전원 꽂은 동안). 노트북이라 배터리로 쓰면 {dc // 60}분 뒤 잠깁니다 — "
+                      "그때도 안 자게 하려면: powercfg /change standby-timeout-dc 0")
+    return True, "정상 — 절전 '해당 없음'"
+
+
 def module_4():
     srv = ROOT / "slack-server"
 
@@ -448,6 +477,13 @@ def module_4():
     started = log.is_file() and "running" in log.read_text(encoding="utf-8", errors="ignore").lower()
     checks.append(("서버가 한 번 이상 정상 기동했다", started,
                    "정상" if started else "slack-server 폴더에서 py -3 -X utf8 server.py (환경점검이 한 번 켜 봅니다)"))
+
+    # 2026-09-16 신설 — PC 가 절전으로 넘어가면 검은 창이 살아 있어도 서버는 멈춘다.
+    # 창을 안 닫았는데 슬랙이 조용해지는 사고의 가장 흔한 원인인데, 그동안 점검 어디에도
+    # 이 항목이 없어서 아무도 원인을 못 짚었다. 화면 꺼짐(모니터)은 상관없고 절전만 문제다.
+    ok_sleep, sleep_msg = check_sleep()
+    checks.append(("PC 가 절전으로 안 넘어간다 (자리를 비워도 직원이 대답하는 근거)",
+                   ok_sleep, sleep_msg))
 
     # ── 2026-09-08 추가: 강의장에서 실제로 난 세 가지 ─────────────────
     #   ① 직원이 대표를 남의 이름으로 부름  → facts.md 에 내 이름이 있어야 한다
@@ -596,6 +632,43 @@ def module_35():
             bad.append(f.name)
     checks.append(("결과물에 견본 인물·실적이 안 들어갔다", not bad,
                    "정상" if not bad else "견본이 들어간 파일: " + ", ".join(bad[:3])))
+
+    # ── 2026-09-16 신설 — 이미 쓰던 내 스킬(MyData\Skill) ────────────────
+    # 클로드를 써 온 수강생은 이미 자기 스킬이 있다. 그게 정본이고, 수업에서 만든
+    # 뼈대 스킬이 그 위를 덮으면 안 된다. 카드 P17-2 를 P18 보다 먼저 돌려야 하는 이유.
+    box = mydata / "Skill"
+    mine = [f for f in box.glob("*.md")] if box.is_dir() else []
+    if not mine:
+        checks.append(("쓰던 내 스킬 가져오기 (MyData\\Skill)", True,
+                       "넣은 것 없음 — 클로드가 처음이면 정상입니다"))
+    else:
+        marker = ("MyData\\Skill", "MyData/Skill")
+        landed = [n for n, x in texts.items() if any(m in x for m in marker)]
+        checks.append((f"쓰던 내 스킬 {len(mine)}개가 실제로 설치됐다 (카드 P17-2)",
+                       bool(landed),
+                       ", ".join(landed) if landed else
+                       "설치 안 됨 — 카드 P17-2 를 카드 P18 '보다 먼저' 돌리세요"))
+
+    # 같은 일을 하는 스킬이 둘 이상 살아 있으면 클로드가 그때그때 다른 걸 고른다.
+    # ("엉뚱한 스킬이 뜬다" 는 증상의 정체) 밀려난 것은 지우지 말고 _보관 으로 옮긴다.
+    JOBS = {"블로그": ("블로그", "blog"), "제안서": ("제안서", "proposal"),
+            "교재": ("교재", "워크북", "gyojae", "workbook"),
+            "프로필": ("프로필", "profile"), "교안": ("교안", "curriculum")}
+    live = [d for d in sk if not d.name.startswith("_")]
+    clash = []
+    for job, keys in JOBS.items():
+        hit = []
+        for d in live:
+            head = (d.name + " " + " ".join(
+                l for l in texts.get(d.name, "").splitlines()[:12])).lower()
+            if any(k.lower() in head for k in keys):
+                hit.append(d.name)
+        if len(hit) > 1:
+            clash.append(f"{job}: " + " / ".join(hit))
+    checks.append(("같은 일을 하는 스킬이 둘 이상 살아 있지 않다", not clash,
+                   "정상" if not clash else
+                   "겹칩니다 — " + " · ".join(clash) +
+                   " → 쓰시던 것만 남기고 나머지는 .claude/skills/_보관/ 으로 옮기세요"))
     return checks
 
 

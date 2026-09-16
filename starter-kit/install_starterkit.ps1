@@ -4,6 +4,9 @@
   더블클릭 설치용 본체.
   - C:\Agent 표준 구조를 만든다.
   - MyData\Proposal·Blog·Logo·Profile(제안서·블로그·로고·프로필) 폴더를 만들어 수강생이 미리 자료를 넣을 자리를 준다.
+  - MyData\Skill 은 이미 클로드를 써 온 수강생이 "쓰던 내 스킬(SKILL.md)"을 그대로 가져오는 자리다.
+    2026-09-16 신설. 그전에는 받아올 자리가 없어서, 이미 잘 쓰던 스킬이 있는 사람도
+    수업에서 만든 뼈대 스킬로 새로 시작해야 했다.
   - 현재 스타터킷을 01_KIT\starter-kit 으로 복사한다.
   - 이동을 느리게 하는 node_modules 및 재생성 파일은 복사하지 않는다.
   - 실제 비밀키와 로그인 상태는 복사하지 않는다.
@@ -75,7 +78,8 @@ $folders = @(
     'MyData\Proposal',
     'MyData\Blog',
     'MyData\Logo',
-    'MyData\Profile'
+    'MyData\Profile',
+    'MyData\Skill'
 )
 
 try {
@@ -98,10 +102,15 @@ if (-not (Test-Path -LiteralPath $guide)) {
         '  Blog\      블로그 — 내가 쓴 블로그 글 3개 (txt·docx·pdf, 또는 글 주소를 적은 txt)',
         '  Logo\      로고 — 회사 로고 1개 (png·jpg·svg). 명함·홈페이지 캡처도 됩니다',
         '  Profile\   프로필 — (선택) 강사 프로필·이력서 3개',
+        '  Skill\     내 스킬 — (선택) 이미 쓰던 스킬 문서(SKILL.md). 있으면 이것이 우선입니다',
         '',
         '폴더 이름이 영문인 이유: 프로그램이 한글 경로에서 드물게 막히는 일을 없애기 위해서입니다.',
         '직원(AI)은 이 폴더를 읽기만 하고 원본을 고치지 않습니다.',
-        '없는 것은 비워 두어도 수업은 진행됩니다. 모듈 3.5(내 자료) 전까지만 채우면 됩니다.'
+        '없는 것은 비워 두어도 수업은 진행됩니다. 모듈 3.5(내 자료) 전까지만 채우면 됩니다.',
+        '',
+        '[Skill 폴더] 클로드를 이미 써 오셨다면, 쓰시던 SKILL.md 를 여기에 넣어 주세요.',
+        '같은 일을 하는 스킬이 수업에도 있으면 대표님이 쓰시던 것이 정본이 되고,',
+        '수업에서 만든 것은 보관 폴더로 물러납니다. 처음이시면 비워 두세요.'
     ) | Set-Content -LiteralPath $guide -Encoding UTF8
 }
 Write-Info "MyData 안내문: $guide"
@@ -204,6 +213,7 @@ if ($script:KitAlreadyExisted) {
 Write-Info "스타터킷: $targetKit"
 Write-Info "기록: $logFile"
 Write-Info "내 자료: $(Join-Path $targetRoot 'MyData') — 제안서 3·블로그 3·로고 1 을 수업 전에 넣어 두세요"
+Write-Info "쓰던 스킬이 있으면: $(Join-Path $targetRoot 'MyData\Skill') 에 SKILL.md 를 넣으면 그것이 우선 적용됩니다"
 Write-Host ''
 Write-Host '  node_modules는 이동 속도와 PC 호환성 문제 때문에 제외했습니다 (모듈 5에서 npm install).' -ForegroundColor Yellow
 

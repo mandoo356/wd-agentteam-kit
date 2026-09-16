@@ -364,11 +364,12 @@ function Check-MyData {
         return
     }
     $n = @{}
-    foreach ($k in 'Proposal','Blog','Logo','Profile') {
+    foreach ($k in 'Proposal','Blog','Logo','Profile','Skill') {
         $n[$k] = @(Get-ChildItem -LiteralPath (Join-Path $base $k) -File -ErrorAction SilentlyContinue).Count
     }
     $ok = ($n['Proposal'] -ge 3) -and ($n['Blog'] -ge 3) -and ($n['Logo'] -ge 1)
-    $d = "제안서(Proposal) $($n['Proposal'])개 · 블로그(Blog) $($n['Blog'])개 · 로고(Logo) $($n['Logo'])개 · 프로필(Profile) $($n['Profile'])개 — $base"
+    $d = "제안서(Proposal) $($n['Proposal'])개 · 블로그(Blog) $($n['Blog'])개 · 로고(Logo) $($n['Logo'])개 · 프로필(Profile) $($n['Profile'])개 · 내 스킬(Skill) $($n['Skill'])개 — $base"
+    if ($n['Skill'] -gt 0) { $d += ' / 쓰던 스킬이 있으니 카드 P17-2 를 P18 보다 먼저 돌리세요' }
     Set-Result 'mydata' '내 자료 (제안서 3·블로그 3·로고 1)' '선택' $ok $d "$base 에 파일을 넣으세요 (모듈 3.5 전까지)"
 }
 
