@@ -76,98 +76,6 @@ FORBIDDEN_IN_BODY = (
 )
 
 
-def _topics_from_body(title: str, body: str, count: int) -> list[str]:
-    """삽화 주제 N개를 뽑는다.
-
-    ① 소제목이 있으면 그걸 쓴다.
-    ② 네이버 본문은 대개 소제목이 없다. 그럴 땐 본문을 N등분해 각 구간의 첫
-       문장을 쓴다 — 이미지도 어차피 본문 사이에 균등 배치되므로, 그 자리에서
-       하는 이야기가 곧 그 그림의 주제가 된다.
-    ③ 그래도 못 뽑으면 제목으로 채우되, 장면이 겹치지 않게 관점을 달리 준다.
-    """
-    def tidy(s: str) -> str:
-        s = _re0.sub(r"[*_`\[\]#>|]", "", s)
-        s = _re0.sub(r"https?://\S+", "", s)
-        return _re0.sub(r"\s+", " ", s).strip()
-
-    heads: list[str] = []
-    for line in body.splitlines():
-        s = line.strip()
-        if s.startswith("#"):
-            s = s.lstrip("#")
-        elif s.startswith(("■", "▶", "◆", "▪", "●")):
-            s = s[1:]
-        else:
-            continue
-        s = tidy(s)
-        if 4 <= len(s) <= 40 and s not in heads:
-            heads.append(s)
-
-    if len(heads) < count:
-        # 인사말·문의 안내는 그림으로 그릴 게 없다. 본문만 남긴다.
-        skip = ("안녕하세", "감사합니", "문의", "연락", "댓글", "구독",
-                "드림", "이상으로")
-        paras = [t for t in (tidy(p) for p in body.split("\n"))
-                 if 15 <= len(t) <= 120 and not any(k in t for k in skip)]
-        if paras:
-            step = max(1, len(paras) // count)
-            for i in range(count):
-                cand = paras[min(i * step, len(paras) - 1)]
-                if cand not in heads:
-                    heads.append(cand)
-
-    # 마지막 안전망 — 같은 프롬프트를 N번 던지면 비슷한 그림만 나온다.
-    angles = ["강의장 전경", "실습하는 참가자들의 손", "교육이 끝난 뒤의 변화"]
-    i = 0
-    while len(heads) < count:
-        heads.append(f"{title} — {angles[i % len(angles)]}")
-        i += 1
-    return heads[:count]
-
-
-def auto_generate_images(title: str, body: str, out_dir: Path, count: int) -> list[Path]:
-    """삽화를 직접 만들어 온다.
-
-    왜 여기서 만드나 — 예전에는 에이전트가 `gen_image.py` 를 따로 돌려 `--images` 로
-    넘겨주기를 기대했다. 그런데 슬랙 경로의 에이전트는 시간 예산이 빠듯해서 그 단계를
-    건너뛰고 `--no-images` 로 빠져나가곤 했고, 결과는 글만 올라간 임시저장이었다
-    (2026-08-09, 2026-08-14 두 번). 사람이 기억해야 하는 절차는 계속 샌다.
-    그래서 **안 주면 여기서 만든다.** 기본 정책대로 최대 4장, 기본 3장.
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-    gen = BASE / "gen_image.py"
-    if not gen.exists():
-        log(f"gen_image.py 를 찾을 수 없어 자동 생성을 건너뜁니다: {gen}")
-        return []
-
-    made: list[Path] = []
-    for i, topic in enumerate(_topics_from_body(title, body, count), start=1):
-        out = out_dir / f"auto_{i:02d}.png"
-        if out.exists():
-            log(f"[이미지 {i}/{count}] 이미 있음 — 재사용: {out.name}")
-            made.append(out)
-            continue
-        # 제목을 앞에 붙여 장면이 글 주제에서 벗어나지 않게 묶는다.
-        scene = topic if topic.startswith(title) else f"{title} 강의 현장 — {topic}"
-        log(f"[이미지 {i}/{count}] 생성 중… 주제: {topic}")
-        try:
-            proc = subprocess.run(
-                [sys.executable, "-X", "utf8", str(gen),
-                 "--topic", scene, "--out", str(out)],
-                capture_output=True, timeout=180, cwd=str(BASE),
-            )
-        except subprocess.TimeoutExpired:
-            log(f"[이미지 {i}/{count}] 시간 초과 — 건너뜁니다")
-            continue
-        if proc.returncode == 0 and out.exists():
-            made.append(out)
-        else:
-            err = proc.stderr.decode("utf-8", errors="replace").strip()[:200]
-            log(f"[이미지 {i}/{count}] 실패 — {err or f'exit {proc.returncode}'}")
-    log(f"자동 생성 완료: {len(made)}장")
-    return made
-
-
 def body_gate(body: str) -> list[str]:
     """정제 후에도 남은 내부 흔적을 잡는 최종 게이트. draft·publish 공통."""
     return [f"본문에 '{m}' 이 남아있음" for m in FORBIDDEN_IN_BODY if m in body]
@@ -945,10 +853,7 @@ def main() -> int:
     ap.add_argument("--images-dir", default="",
                     help="이 폴더의 이미지를 이름순으로 최대 4장 사용. --images 대신 쓴다.")
     ap.add_argument("--no-images", action="store_true",
-                    help="(호환용) 이미지 없이 글만 올린다. 2026-09-08 판부터는 안 붙여도 이미지가 없으면 글만 올린다.")
-    ap.add_argument("--auto-images", type=int, default=0,
-                    help="이미지를 안 줬을 때 Gemini 로 직접 만들어 넣을 장수(최대 4). 기본 0 — 만들지 않는다. "
-                         "AI 삽화 자동 생성은 오래 걸리고 결제 키가 필요해 기본에서 뺐다(2026-09-08). 쓰려면 naver-blog/.env 에 GOOGLE_API_KEY.")
+                    help="(호환용) 붙여도 동작은 같다. 이미지가 없으면 글만 올린다.")
     ap.add_argument("--raw", action="store_true",
                     help="정제 없이 파일 내용 그대로 붙여넣는다(내부 메모까지 들어감).")
     a = ap.parse_args()
@@ -999,13 +904,10 @@ def main() -> int:
         imgs = sorted(p for p in d.iterdir()
                       if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"))
         log(f"{d} 에서 이미지 {len(imgs)}장 발견")
-    # 2026-09-08: 이미지가 없으면 글만 올린다. AI 삽화 자동 생성(예전 기본 3장)은 오래 걸리고
-    # 결제 키가 필요해 기본에서 뺐다. 대표가 찍은 사진은 --images / --images-dir 로 넣는다.
-    if not imgs and not a.no_images and a.auto_images > 0:
-        n = min(a.auto_images, MAX_IMAGES)
-        log(f"이미지가 0장입니다 → 삽화 {n}장을 직접 생성합니다 (--auto-images {a.auto_images})")
-        imgs = auto_generate_images(a.title, body, bf.parent / "img", n)
-        if not imgs:
+    # 2026-09-18 — 삽화 자동생성을 코드에서 완전히 뺐다(대표 지시).
+    # Gemini 이미지 API 크레딧이 이쪽으로 빠지고, 이미지 안에 영문 글자가 생기는
+    # 문제가 있었다. 사진은 --images / --images-dir 로 직접 준 것만 넣는다.
+    if not imgs:
             log("자동 생성이 모두 실패했습니다 → 글만 올립니다.")
     if not imgs:
         log("이미지 없이 글만 올립니다. 사진을 넣으려면 --images 또는 --images-dir.")

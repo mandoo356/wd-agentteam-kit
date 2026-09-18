@@ -1,0 +1,11 @@
+# 배포 저장소에는 작업 흔적을 올리지 않는다. 2026-09-18 신설.
+# 백업이 학습자 킷에 섞여 들어가 구버전 코드가 함께 배포된 일이 있었다.
+*.bak
+*.bak_*
+*.bak-*
+*.log
+*.pyc
+__pycache__/
+.env
+.naver-state.json
+.agent_session.json

@@ -165,7 +165,11 @@ if (Test-Path -LiteralPath $marker) {
         '.agent_session.json',
         '.naver-state.json',
         '환경점검_결과.html',
-        '*.pyc'
+        '*.pyc',
+        '*.log',
+        '*.bak',
+        '*.bak_*',
+        '*.bak-*'
     )
 
     & robocopy @copyArgs | Out-Null
