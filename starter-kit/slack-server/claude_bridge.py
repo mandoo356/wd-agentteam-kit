@@ -45,10 +45,11 @@ SESSION_FILE = Path(__file__).resolve().parent / ".agent_session.json"
 # 3시간. 예전엔 24시간이었는데, 어제 대화(다른 이름·옛 요청)를 오늘까지 끌고 와서
 # "왜 아직도 그 얘기야" 가 됐다. 슬랙에서 "새 대화" 라고 치면 즉시 잊는다 (server.py).
 SESSION_MAX_AGE_SEC = int(os.environ.get("SESSION_MAX_AGE_SEC", str(3 * 3600)))
-# 직원 파일 본문을 프롬프트에 넣을 때 상한. 2026-09-08 1,400 → 3,000.
+# 직원 파일 본문을 프롬프트에 넣을 때 상한. 2026-09-08 1,400 → 3,000, 2026-09-19 → 8,000.
 # 카드 P5·P6·P7 이 팀장 파일에 줄을 덧붙이면 1,400 을 넘겨 뒤쪽 규칙이 잘려 나갔다 —
 # "역할을 잊는" 게 아니라 못 본 것이었다. 입력 길이는 도구 왕복 한 번보다 훨씬 싸다.
-AGENT_BODY_LIMIT = int(os.environ.get("AGENT_BODY_LIMIT", "3000"))
+# 3,000 도 같은 이유로 좁았다(P6 세 규칙 + 스킬 연결 줄이 쌓이면 넘는다).
+AGENT_BODY_LIMIT = int(os.environ.get("AGENT_BODY_LIMIT", "8000"))
 # 슬랙 답에 쓸 모델. 비우면 Claude Code 기본값. 슬랙 답은 5줄이라 sonnet 이면 체감이 크게 빨라진다.
 # 강사 시연 PC 처럼 큰 산출물 품질이 중요하면 .env 에 AGENT_MODEL=opus.
 AGENT_MODEL = os.environ.get("AGENT_MODEL", "sonnet").strip()
@@ -61,8 +62,11 @@ SESSION_MAX_TURNS = int(os.environ.get("SESSION_MAX_TURNS", "60"))
 WORKLOG_FILE = KIT_ROOT / "workspace" / "기록" / "작업일지.md"
 WORKLOG_LINES = int(os.environ.get("WORKLOG_LINES", "6"))          # 어제 이전 것에서 몇 줄
 WORKLOG_TODAY_MAX = int(os.environ.get("WORKLOG_TODAY_MAX", "40"))  # 오늘 것은 최대 몇 줄
-# 팀 규약(facts.md)을 프롬프트에 넣을 때 상한
-FACTS_LIMIT = int(os.environ.get("FACTS_LIMIT", "3000"))
+# 팀 규약(facts.md)을 프롬프트에 넣을 때 상한. 2026-09-19 3,000 → 8,000.
+# 규약은 쓸수록 길어지는데 넘치면 뒤쪽이 조용히 잘린다. 직원은 그걸 "전문"으로 받으니
+# 못 본 규칙을 없는 규칙으로 여긴다 — 대표 눈에는 "적어놨는데 왜 안 해?" 로만 보인다.
+# 직원 파일 상한을 올렸던 것(위 AGENT_BODY_LIMIT)과 똑같은 이유다.
+FACTS_LIMIT = int(os.environ.get("FACTS_LIMIT", "8000"))
 
 
 class ClaudeError(RuntimeError):
