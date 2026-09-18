@@ -98,7 +98,13 @@ $files = @(
     'mail/.env.example',
     'mail/skill/SKILL.md',
     'naver-blog/naver_draft.py',
-    'naver-blog/README.md'
+    'naver-blog/README.md',
+    'slack-server/.env.example',
+    'LICENSE',
+    # 2026-09-18 카드 P20-c (저녁 8시 자동 블로그). 폴더가 없어도 받으면서 만든다.
+    '저녁블로그/evening_blog.py',
+    '저녁블로그/evening_blog.bat',
+    '저녁블로그/예약등록.bat'
 )
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $bak   = Join-Path $Kit "backup\update-$stamp"
