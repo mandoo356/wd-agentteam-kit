@@ -686,6 +686,30 @@ function Test-Server {
     Set-Result 'server' '슬랙 서버 첫 기동 (준비 완료)' '필수' $ok $d 'slack-server 폴더에서 py -3 -X utf8 server.py 를 켜고 메시지를 읽으세요'
 }
 
+function Enable-Autostart {
+    # 슬랙 서버가 로그온 때마다 저절로 뜨게 등록한다.
+    # 이게 없으면 수강생이 검은 창을 닫거나 PC 를 껐다 켤 때마다 직원들이 조용히 사라지고,
+    # 터미널에서 py -3 -X utf8 server.py 를 다시 쳐야 한다. 2026-09-20 신설.
+    if ($NoServerTest) { return }
+    if (-not (Is-Ok 'server')) { Set-Result 'autostart' 'PC 켤 때 슬랙 서버 자동 시작' '필수' $false '서버 첫 기동 먼저'; return }
+    $ps1 = Join-Path $KIT 'slack-server\autostart.ps1'
+    if (-not (Test-Path -LiteralPath $ps1)) { Set-Result 'autostart' 'PC 켤 때 슬랙 서버 자동 시작' '필수' $false 'autostart.ps1 이 없습니다 — 스타터킷 다시 설치'; return }
+    Write-Step '이제 PC 를 켤 때마다 슬랙 서버가 저절로 뜨도록 등록합니다'
+    try {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ps1 -Enable -Quiet 2>&1 | ForEach-Object { Write-Info $_ }
+    } catch { Write-Warn "등록 중 오류: $_" }
+    $pidFile = Join-Path $KIT 'slack-server\logs\server.pid'
+    $ok = $false; $d = '자동시작 등록에 실패했습니다'
+    $reg = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue
+    if ($reg -and $reg.WithdreamStarterkitServer) {
+        $sid = $null
+        if (Test-Path -LiteralPath $pidFile) { $sid = (Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1) -as [int] }
+        if ($sid -and (Get-Process -Id $sid -ErrorAction SilentlyContinue)) { $ok = $true; $d = "등록 완료 — 지금도 켜져 있습니다 (PID $sid)" }
+        else { $ok = $true; $d = '등록 완료 — 다음에 PC 를 켜면 뜹니다' }
+    }
+    Set-Result 'autostart' 'PC 켤 때 슬랙 서버 자동 시작' '필수' $ok $d '스타터킷 폴더의 자동시작_켜기.bat 을 눌러 주세요'
+}
+
 function Fix-OptionalLogins {
     if ($SkipLogin -or -not $OptionalLogins) { return }
     if (-not ((Is-Ok 'python') -and (Is-Ok 'playwright') -and (Is-Ok 'chrome'))) { return }
@@ -911,6 +935,7 @@ Check-SlackEnv | Out-Null
 Fix-Slack
 Test-SlackLive
 Test-Server
+Enable-Autostart
 
 Write-Step '6/6 선택 항목 (메일 연결 · 네이버 블로그 로그인)'
 Check-MailEnv | Out-Null
