@@ -63,11 +63,29 @@ if ($env:WD_NO_KILL) {
     Info '서버 끄기는 건너뜁니다 (WD_NO_KILL). 켜져 있으면 그 창에서 Ctrl+C.'
 } else {
     try {
+        # 2026-09-20: 자동시작(supervisor)으로 떠 있는 킷 서버부터 내린다.
+        # 감시기를 먼저 죽이지 않으면 서버를 꺼도 10초 뒤 되살아나 옛 판이 계속 돈다.
+        # 어느 python 을 끌지는 이름이 아니라 킷이 적어둔 PID 파일로 고른다 — 강사 홈서버를 지키기 위해서다.
+        foreach ($pf in @('supervisor.pid', 'server.pid')) {
+            $pfp = Join-Path $Srv "logs\$pf"
+            if (Test-Path -LiteralPath $pfp) {
+                $tid = (Get-Content -LiteralPath $pfp -ErrorAction SilentlyContinue | Select-Object -First 1) -as [int]
+                $want = if ($pf -eq 'supervisor.pid') { 'powershell' } else { 'python' }
+                if ($tid) {
+                    $tp = Get-Process -Id $tid -ErrorAction SilentlyContinue
+                    if ($tp -and $tp.ProcessName -eq $want) {
+                        try { Stop-Process -Id $tid -Force -ErrorAction Stop; $killed++ } catch {}
+                    }
+                }
+                Remove-Item -LiteralPath $pfp -ErrorAction SilentlyContinue
+            }
+            Start-Sleep -Milliseconds 400
+        }
+        # 손으로 검은 창에서 켠 서버도 내린다 (강사 홈서버·감시기 자식은 제외)
         $all = @(Get-CimInstance Win32_Process -ErrorAction Stop)
         $all | Where-Object {
             $_.Name -match '^python' -and $_.CommandLine -and $_.CommandLine -match 'server\.py'
         } | ForEach-Object {
-            # 감시기(supervisor)가 띄운 다른 서버(강사 홈서버 등)는 건드리지 않는다 — 수강생 킷의 서버만
             $ppid = $_.ParentProcessId
             $par = $all | Where-Object { $_.ProcessId -eq $ppid } | Select-Object -First 1
             if ($par -and $par.CommandLine -and $par.CommandLine -match 'supervisor|withdream-agent-server') { return }
@@ -104,7 +122,14 @@ $files = @(
     # 2026-09-18 카드 P20-c (저녁 8시 자동 블로그). 폴더가 없어도 받으면서 만든다.
     '저녁블로그/evening_blog.py',
     '저녁블로그/evening_blog.bat',
-    '저녁블로그/예약등록.bat'
+    '저녁블로그/예약등록.bat',
+    # 2026-09-20 자동시작 — PC 를 껐다 켜도 슬랙 서버가 저절로 뜬다.
+    # 그전에는 매번 검은 창에서 py -3 -X utf8 server.py 를 쳐야 했다.
+    'slack-server/supervisor.ps1',
+    'slack-server/launcher.vbs',
+    'slack-server/autostart.ps1',
+    '자동시작_켜기.bat',
+    '자동시작_끄기.bat'
 )
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $bak   = Join-Path $Kit "backup\update-$stamp"
@@ -121,7 +146,9 @@ foreach ($rel in $files) {
     try {
         Invoke-WebRequest -Uri $url -OutFile $dst -UseBasicParsing
         $len = (Get-Item -LiteralPath $dst).Length
-        if ($len -lt 200) { throw "받은 파일이 너무 작습니다 ($len bytes)" }
+        # 자동시작 bat 은 한 줄짜리 실행기라 120 bytes 남짓이다. 파일마다 기준을 달리 본다.
+        $minLen = if ($rel -match '\.bat$') { 40 } else { 200 }
+        if ($len -lt $minLen) { throw "받은 파일이 너무 작습니다 ($len bytes)" }
         $got += $rel
         Info ("{0}  ({1:N0} bytes)" -f $rel, $len)
     } catch {
@@ -205,14 +232,30 @@ try { & py -3 '점검.py' '4' | Out-Host } catch { Warn "점검을 못 돌렸습
 Pop-Location
 
 # ── 7. 서버 다시 켜기 ────────────────────────────────────────
-Step '슬랙 서버를 새 창에서 켭니다'
+Step '슬랙 서버 켜기 — 이제 PC 를 껐다 켜도 저절로 뜹니다'
 if ($env:WD_NO_SERVER) {
-    Info '서버 자동 기동은 건너뜁니다 (WD_NO_SERVER). slack-server 폴더에서 직접:  py -3 server.py'
+    Info '서버 자동 기동은 건너뜁니다 (WD_NO_SERVER). slack-server 폴더에서 직접:  py -3 -X utf8 server.py'
 } else {
-    try {
-        Start-Process -FilePath "$env:ComSpec" -ArgumentList '/k', 'chcp 65001 >nul & py -3 server.py' -WorkingDirectory $Srv
-        Info '새 검은 창에 "✅ 준비 완료" 가 뜨면 됩니다. 그 창은 닫지 마세요.'
-    } catch { Warn "서버를 자동으로 못 켰습니다. slack-server 폴더에서 직접:  py -3 server.py" }
+    $auto = Join-Path $Srv 'autostart.ps1'
+    if (Test-Path -LiteralPath $auto) {
+        try {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $auto -Enable -Quiet 2>&1 | ForEach-Object { Info $_ }
+            $sp = Join-Path $Srv 'logs\server.pid'
+            $sid = $null
+            if (Test-Path -LiteralPath $sp) { $sid = (Get-Content -LiteralPath $sp -ErrorAction SilentlyContinue | Select-Object -First 1) -as [int] }
+            if ($sid -and (Get-Process -Id $sid -ErrorAction SilentlyContinue)) {
+                Info "서버가 켜졌습니다 (PID $sid). 검은 창은 뜨지 않습니다 — 닫을 창도 없습니다."
+            } else {
+                Warn '자동시작 등록은 됐지만 서버가 아직 안 올라왔습니다. 스타터킷 폴더의 자동시작_켜기.bat 을 한 번 눌러 보세요.'
+            }
+        } catch { Warn "자동시작 등록에 실패했습니다: $($_.Exception.Message)" }
+    } else {
+        # 옛 킷이라 autostart.ps1 을 못 받은 경우의 대비책
+        try {
+            Start-Process -FilePath "$env:ComSpec" -ArgumentList '/k', 'chcp 65001 >nul & py -3 -X utf8 server.py' -WorkingDirectory $Srv
+            Info '새 검은 창에 "✅ 준비 완료" 가 뜨면 됩니다. 그 창은 닫지 마세요.'
+        } catch { Warn "서버를 자동으로 못 켰습니다. slack-server 폴더에서 직접:  py -3 -X utf8 server.py" }
+    }
 }
 
 Write-Host ''
