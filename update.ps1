@@ -129,7 +129,10 @@ $files = @(
     'slack-server/launcher.vbs',
     'slack-server/autostart.ps1',
     '자동시작_켜기.bat',
-    '자동시작_끄기.bat'
+    '자동시작_끄기.bat',
+    # 2026-10-02 시작 bat — 스타터킷 폴더에서 클로드를 띄운다(cd /d "%~dp0").
+    # 창을 아무 데서나 열고 claude 를 치면 직원·스킬·훅이 하나도 안 붙는다.
+    '01_클로드_시작.bat'
 )
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $bak   = Join-Path $Kit "backup\update-$stamp"
