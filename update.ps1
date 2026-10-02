@@ -7,7 +7,7 @@
 #
 #  하는 일 (2026-09-08)
 #    1) 켜져 있는 슬랙 서버(server.py)를 끈다
-#    2) 엔진 파일만 새 판으로 바꾼다 — server.py · claude_bridge.py · roster.py(신설) · 점검.py · 카드·README
+#    2) 새 판 묶음을 통째로 받아, 내가 만든 것만 빼고 모두 새 판으로 바꾼다 (2026-10-02 방식 변경)
 #       ※ 내가 만든 것(직원 .claude/agents · 스킬 · personas.py · agent_channels.py · .env · workspace)은 건드리지 않는다
 #    3) 바꾸기 전 파일은 starter-kit\backup\update-날짜\ 에 남긴다
 #    4) 어제 대화(.agent_session.json)를 지워 새 대화로 시작한다 — 잘못 기억한 이름이 여기서 끊긴다
@@ -95,72 +95,63 @@ if ($env:WD_NO_KILL) {
     if ($killed -gt 0) { Info "서버 $killed 개를 껐습니다. 옛 서버 창은 닫아도 됩니다." } else { Info '켜져 있는 서버가 없습니다.' }
 }
 
-# ── 2. 받을 파일 ─────────────────────────────────────────────
-#   내가 고치는 파일(personas.py · agent_channels.py · .env · 직원 · 스킬)은 이 목록에 없다.
-$files = @(
-    'slack-server/server.py',
-    'slack-server/slack_check.py',
-    'slack-server/test_join_request.py',
-    'slack-server/claude_bridge.py',
-    'slack-server/roster.py',
-    'slack-server/README.md',
-    '점검.py',
-    '프롬프트카드.md',
-    '프롬프트카드_전문스킬.md',
-    'README.md',
-    'mail/mail_common.py',
-    'mail/mail_check.py',
-    'mail/mail_read.py',
-    'mail/mail_send.py',
-    'mail/README.md',
-    'mail/.env.example',
-    'mail/skill/SKILL.md',
-    'naver-blog/naver_draft.py',
-    'naver-blog/README.md',
-    'slack-server/.env.example',
-    'LICENSE',
-    # 2026-09-18 카드 P20-c (저녁 8시 자동 블로그). 폴더가 없어도 받으면서 만든다.
-    '저녁블로그/evening_blog.py',
-    '저녁블로그/evening_blog.bat',
-    '저녁블로그/예약등록.bat',
-    # 2026-09-20 자동시작 — PC 를 껐다 켜도 슬랙 서버가 저절로 뜬다.
-    # 그전에는 매번 검은 창에서 py -3 -X utf8 server.py 를 쳐야 했다.
-    'slack-server/supervisor.ps1',
-    'slack-server/launcher.vbs',
-    'slack-server/autostart.ps1',
-    '자동시작_켜기.bat',
-    '자동시작_끄기.bat',
-    # 2026-10-02 시작 bat — 스타터킷 폴더에서 클로드를 띄운다(cd /d "%~dp0").
-    # 창을 아무 데서나 열고 claude 를 치면 직원·스킬·훅이 하나도 안 붙는다.
-    '01_클로드_시작.bat'
+# ── 2. 새 판 묶음 받기 ───────────────────────────────────────
+#   2026-10-02 방식을 뒤집었다. 전에는 '바꿀 파일 30개'를 손으로 적어 두었는데,
+#   새로 만든 파일을 그 목록에 적는 걸 잊으면 수강생에게 조용히 안 갔다
+#   (실측: 킷 100개 중 70개가 그 상태. 훅·settings.json·환경점검·직원견본·office 전부).
+#   이제는 **내가 만든 것만 지키고 나머지는 모두 새 판으로 바꾼다.**
+$protectFiles = @(
+    'slack-server\personas.py',
+    'slack-server\agent_channels.py',
+    'office\company.config.ts'
 )
+$protectRe    = '(^|\\)(\.claude\\agents|\.claude\\skills|workspace|logs|backup|__pycache__|node_modules|\.git)(\\|$)'
+$protectNames = @('.env', '.agent_session.json', '.naver-state.json', '.dev.vars')
+
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $bak   = Join-Path $Kit "backup\update-$stamp"
 $tmp   = Join-Path $Root "90_TEMP\update-$stamp"
 $null  = New-Item -ItemType Directory -Path $tmp -Force
 
-Step '새 엔진 파일 받기'
-$got = @()
-foreach ($rel in $files) {
-    $segs = @(($rel -split '/') | ForEach-Object { [uri]::EscapeDataString($_) })
-    $url  = $RawBase + '/' + ($segs -join '/')
-    $dst = Join-Path $tmp ($rel -replace '/', '\')
-    $null = New-Item -ItemType Directory -Path (Split-Path $dst) -Force
-    try {
-        Invoke-WebRequest -Uri $url -OutFile $dst -UseBasicParsing
-        $len = (Get-Item -LiteralPath $dst).Length
-        # 자동시작 bat 은 한 줄짜리 실행기라 120 bytes 남짓이다. 파일마다 기준을 달리 본다.
-        $minLen = if ($rel -match '\.bat$') { 40 } else { 200 }
-        if ($len -lt $minLen) { throw "받은 파일이 너무 작습니다 ($len bytes)" }
-        $got += $rel
-        Info ("{0}  ({1:N0} bytes)" -f $rel, $len)
-    } catch {
-        Fail "다운로드 실패: $rel`n     인터넷 연결 또는 기관 방화벽(github.com)을 확인하세요. ($($_.Exception.Message))"
-    }
+Step '새 판 묶음 받기'
+$zipPath = Join-Path $tmp 'kit.zip'
+$ZipUrl  = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
+try { Invoke-WebRequest -Uri $ZipUrl -OutFile $zipPath -UseBasicParsing }
+catch { Fail "묶음을 못 받았습니다. 인터넷 또는 기관 방화벽(github.com)을 확인하세요.`n     ($($_.Exception.Message))" }
+Info ("묶음 {0:N0} KB" -f ((Get-Item -LiteralPath $zipPath).Length / 1KB))
+
+$ext = Join-Path $tmp 'ext'
+$null = New-Item -ItemType Directory -Path $ext -Force
+try { Expand-Archive -LiteralPath $zipPath -DestinationPath $ext -Force }
+catch { Fail "압축을 못 풀었습니다. ($($_.Exception.Message))" }
+
+$newKit = $null
+foreach ($d in @(Get-ChildItem -LiteralPath $ext -Directory)) {
+    $cand = Join-Path $d.FullName 'starter-kit'
+    if (Test-Path -LiteralPath $cand) { $newKit = $cand; break }
 }
+if (-not $newKit) { Fail '받은 묶음 안에 starter-kit 폴더가 없습니다.' }
+
 # 새 server.py 가 정말 새 판인지 (roster 를 쓰는지) 확인 — 캐시된 옛 파일이면 여기서 멈춘다
-$srvText = Get-Content -LiteralPath (Join-Path $tmp 'slack-server\server.py') -Raw -Encoding UTF8
+$srvNew = Join-Path $newKit 'slack-server\server.py'
+if (-not (Test-Path -LiteralPath $srvNew)) { Fail '받은 묶음에 slack-server\server.py 가 없습니다.' }
+$srvText = Get-Content -LiteralPath $srvNew -Raw -Encoding UTF8
 if ($srvText -notmatch 'from roster import') { Fail '받은 server.py 가 새 판이 아닙니다. 잠시 후 다시 실행해 보세요.' }
+
+Step '지킬 것 빼고 바꿀 목록 만들기'
+$got  = @()
+$kept = @()
+foreach ($f in @(Get-ChildItem -LiteralPath $newKit -File -Recurse -Force)) {
+    $rel = $f.FullName.Substring($newKit.Length + 1)
+    $skip = $false
+    if ($protectFiles -contains $rel) { $skip = $true }
+    if (-not $skip -and $rel -match $protectRe) { $skip = $true }
+    if (-not $skip -and ($protectNames -contains $f.Name)) { $skip = $true }
+    if ($skip) { $kept += $rel } else { $got += $rel }
+}
+# 묶음이 깨졌는데 '0개 교체'로 조용히 끝나는 일을 막는다
+if ($got.Count -lt 20) { Fail "바꿀 파일이 $($got.Count)개뿐입니다 — 받은 묶음이 깨진 것 같습니다. 중단합니다." }
+Info ("바꿀 파일 {0}개 · 지킬 파일 {1}개" -f $got.Count, $kept.Count)
 
 # ── 3. 백업하고 바꿔 넣기 ────────────────────────────────────
 Step "바꾸기 전 파일 백업 → $bak"
@@ -174,12 +165,12 @@ foreach ($rel in $got) {
 }
 Step '엔진 파일 교체'
 foreach ($rel in $got) {
-    $src = Join-Path $tmp ($rel -replace '/', '\')
+    $src = Join-Path $newKit $rel
     $dst = Join-Path $Kit ($rel -replace '/', '\')
     $null = New-Item -ItemType Directory -Path (Split-Path $dst) -Force
     Copy-Item -LiteralPath $src -Destination $dst -Force
 }
-Info ("{0}개 교체. personas.py · agent_channels.py · .env · 직원 · 스킬은 그대로입니다." -f $got.Count)
+Info ("{0}개 교체. 직원 · 스킬 · personas.py · agent_channels.py · .env · company.config.ts · workspace 는 그대로입니다." -f $got.Count)
 try { Remove-Item -LiteralPath (Join-Path $Srv '__pycache__') -Recurse -Force -ErrorAction SilentlyContinue } catch {}
 try { Remove-Item -LiteralPath $tmp -Recurse -Force } catch {}
 
