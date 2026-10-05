@@ -50,6 +50,10 @@ FORBIDDEN_CMD = re.compile(
 )
 
 PROTECTED_DIRS = (".claude/", "workspace/memory/")
+# 고친것.md 는 보호 구역 안에 있지만 "쌓이는 공책"이다. 직원이 일을 마칠 때마다 한 줄 보태야 하는데,
+# 여기서 확인 창을 띄우면 슬랙에서는 ask→deny 로 아예 막히고(아래 slack 처리), 터미널에서도 매번
+# 눌러야 해서 기록이 끊긴다. 팀 규약(facts.md)·직원·스킬은 그대로 보호한다. (2026-10-05)
+LEDGER_FILES = ("workspace/memory/고친것.md",)
 PROTECTED_FILES = ("slack-server/.env", "office/company.config.ts", "office/company.config.js", ".gitignore")
 LOCKED_FILES = ("점검.py", ".claude/settings.json")
 LOCKED_DIRS = (".claude/hooks/",)
@@ -112,6 +116,8 @@ def judge(data, root):
     if tool in ("Edit", "MultiEdit", "Write", "NotebookEdit"):
         path = inp.get("file_path") or inp.get("notebook_path") or ""
         r = rel(root, path)
+        if r in LEDGER_FILES:
+            return "allow", ""
         if r in LOCKED_FILES or any(r.startswith(d) for d in LOCKED_DIRS):
             return "deny", f"{r} 는 채점표·안전장치입니다. 수강생이 고치는 파일이 아닙니다."
         if any(r.startswith(d) for d in PROTECTED_DIRS) or r in PROTECTED_FILES:
