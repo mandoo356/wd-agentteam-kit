@@ -82,7 +82,11 @@ Start-Sleep -Milliseconds 500
 Stop-ByPidFile $pidFile '먼저 돌던 서버' 'python'
 
 $cmd = "wscript.exe `"$vbs`""
-New-Item -Path $runKey -Force | Out-Null
+# 2026-10-05 ⚠ 치명적 버그 수정 — 예전 코드는 New-Item -Path $runKey -Force 였다.
+#   레지스트리에서 -Force 로 기존 키를 만들면 **키를 지우고 새로 만든다** = 그 안의 값이 전부 날아간다.
+#   실제로 이 줄 때문에 카카오톡·크롬·다른 프로그램의 로그온 자동시작이 통째로 사라졌다(실측).
+#   없을 때만 만든다.
+if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey -Force | Out-Null }
 Set-ItemProperty -Path $runKey -Name $runName -Value $cmd
 Say '✔ 로그온할 때마다 저절로 켜지도록 등록했습니다.' 'Green'
 Say "  등록 내용: $cmd" 'DarkGray'
