@@ -49,8 +49,15 @@ $argList = if ($useLauncher) { @('-3.14','-X','utf8','server.py') } else { @('-X
 # 감시기 자신의 PID 도 남긴다 — 끌 때 이 감시기만 정확히 내리기 위해서.
 Set-Content -Path (Join-Path $logDir 'supervisor.pid') -Value $PID -Encoding ascii
 
+# 2026-10-05: 예전에는 여기서 10초마다 조용히 영원히 다시 띄웠다. 열쇠가 틀리면
+#   하루 종일 돌면서 아무도 모른다 — 수강생 눈에는 "PC 를 껐다 켜니 슬랙이 죽었다" 로 보인다.
+#   그래서 ① 바로 꺼지는 게 3번 연속이면 안내 창을 한 번 띄우고 ② 재시도 간격을 60초로 늘린다.
+#   한 번이라도 20초 넘게 버티면 정상으로 보고 카운터를 되돌린다.
+$fails = 0
+$notified = $false
 while ($true) {
     Write-Log 'starting server.py (supervisor)'
+    $t0 = Get-Date
     try {
         $proc = Start-Process -FilePath $py -ArgumentList $argList -WorkingDirectory $dir -WindowStyle Hidden -PassThru
         Set-Content -Path $pidFile -Value $proc.Id -Encoding ascii
@@ -60,6 +67,35 @@ while ($true) {
         Write-Log "start error: $($_.Exception.Message)"
     }
     Remove-Item -LiteralPath $pidFile -ErrorAction SilentlyContinue
-    Write-Log 'server.py exited - restart in 10s'
-    Start-Sleep -Seconds 10
+    $lived = [int]((Get-Date) - $t0).TotalSeconds
+    if ($lived -lt 20) { $fails++ } else { $fails = 0; $notified = $false }
+
+    if ($fails -ge 3) {
+        $help = Join-Path $dir 'logs\서버가_안뜹니다.txt'
+        @(
+            '슬랙 서버가 떴다가 바로 꺼지는 것이 반복되고 있습니다.',
+            '',
+            "마지막 확인: $(Get-Date -Format 'yyyy-MM-dd HH:mm')   연속 실패 $fails 회",
+            '',
+            '거의 모든 경우 원인은 슬랙 열쇠 3개입니다.',
+            '  1) 스타터킷 폴더의 환경점검.bat 을 다시 누르세요',
+            '  2) 열쇠 3개를 다시 붙여넣으세요 (xoxb- / xapp- / 내 슬랙 아이디)',
+            '  3) 끝나면 이 파일은 지워도 됩니다',
+            '',
+            '자세한 기록: slack-server\logs\launcher.log'
+        ) | Set-Content -LiteralPath $help -Encoding UTF8
+        if (-not $notified) {
+            Write-Log "연속 $fails 회 실패 — 안내 창을 띄우고 재시도 간격을 60초로 늘립니다."
+            $notice = Join-Path $dir 'notice.vbs'
+            if (Test-Path -LiteralPath $notice) {
+                try { Start-Process -FilePath 'wscript.exe' -ArgumentList ('"{0}"' -f $notice) -WindowStyle Hidden } catch {}
+            }
+            $notified = $true
+        }
+        Write-Log 'server.py exited - restart in 60s'
+        Start-Sleep -Seconds 60
+    } else {
+        Write-Log 'server.py exited - restart in 10s'
+        Start-Sleep -Seconds 10
+    }
 }

@@ -691,7 +691,10 @@ function Enable-Autostart {
     # 이게 없으면 수강생이 검은 창을 닫거나 PC 를 껐다 켤 때마다 직원들이 조용히 사라지고,
     # 터미널에서 py -3 -X utf8 server.py 를 다시 쳐야 한다. 2026-09-20 신설.
     if ($NoServerTest) { return }
-    if (-not (Is-Ok 'server')) { Set-Result 'autostart' 'PC 켤 때 슬랙 서버 자동 시작' '필수' $false '서버 첫 기동 먼저'; return }
+    # 2026-10-05: 서버 첫 기동이 실패해도 등록은 한다. 등록을 건너뛰면 PC 를 껐다 켤 때
+    #   아무것도 뜨지 않고, 수강생은 그 사실을 다음 수업에서야 안다. 감시기가 10초마다
+    #   다시 시도하니 열쇠를 고치는 순간부터 저절로 뜬다.
+    $serverUp = Is-Ok 'server'
     $ps1 = Join-Path $KIT 'slack-server\autostart.ps1'
     if (-not (Test-Path -LiteralPath $ps1)) { Set-Result 'autostart' 'PC 켤 때 슬랙 서버 자동 시작' '필수' $false 'autostart.ps1 이 없습니다 — 스타터킷 다시 설치'; return }
     Write-Step '이제 PC 를 켤 때마다 슬랙 서버가 저절로 뜨도록 등록합니다'
@@ -705,7 +708,8 @@ function Enable-Autostart {
         $sid = $null
         if (Test-Path -LiteralPath $pidFile) { $sid = (Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1) -as [int] }
         if ($sid -and (Get-Process -Id $sid -ErrorAction SilentlyContinue)) { $ok = $true; $d = "등록 완료 — 지금도 켜져 있습니다 (PID $sid)" }
-        else { $ok = $true; $d = '등록 완료 — 다음에 PC 를 켜면 뜹니다' }
+        elseif ($serverUp) { $ok = $true; $d = '등록 완료 — 다음에 PC 를 켜면 뜹니다' }
+        else { $ok = $true; $d = '등록은 됐습니다 — 다만 서버가 아직 안 떴습니다. 슬랙 열쇠 3개를 확인하고 환경점검을 다시 돌리면 그때부터 저절로 뜹니다' }
     }
     Set-Result 'autostart' 'PC 켤 때 슬랙 서버 자동 시작' '필수' $ok $d '스타터킷 폴더의 자동시작_켜기.bat 을 눌러 주세요'
 }
