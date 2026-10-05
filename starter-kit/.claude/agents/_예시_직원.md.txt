@@ -1,7 +1,6 @@
 ---
 name: staff1
 description: 영상 기획·섬네일 아이디어 담당. 새 영상 주제를 잡거나 섬네일 문구가 필요할 때 부른다.
-tools: All tools
 ---
 
 # 섬네일 담당
