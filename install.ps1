@@ -111,6 +111,23 @@ $srcKit = $installer.DirectoryName
 $srcCount = (Get-ChildItem -LiteralPath $srcKit -File -Force -Recurse | Measure-Object).Count
 Info "스타터킷 파일 $srcCount 개 확인"
 
+# ── 3-B. 코덱스판 정리 ──────────────────────────────────────
+# 2026-10-19: 코덱스판도 같은 01_KIT\starter-kit 에 깔린다. 그대로 두면 설치는 "이미 있음"으로 건너뛰고
+# 아래 환경점검이 코덱스판 env_check 를 돌려 Codex 를 깔았다. 옛 자동시작도 남아 같은 슬랙 열쇠로 계속 떴다.
+# 코덱스 서버를 끄고 자동시작을 지운 뒤, 폴더는 지우지 않고 01_KIT_codex_날짜 로 보관한다.
+Unregister-ScheduledTask -TaskName 'WithDream Slack Codex Server' -Confirm:$false -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'WithdreamCodexServer' -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe' or Name='python.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    $_.CommandLine -match '([A-Za-z]:\\[^"]*?slack-server)\\(run_hidden\.ps1|server\.py)' -and (Test-Path -LiteralPath (Join-Path $Matches[1] 'codex_bridge.py'))
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+if (Test-Path -LiteralPath (Join-Path $Kit 'slack-server\codex_bridge.py')) {
+    Step '코덱스판이 깔려 있어 보관하고 클로드판을 새로 설치'
+    $old = Join-Path $Root ('01_KIT_codex_' + (Get-Date -Format 'yyyyMMdd_HHmm'))
+    try { Start-Sleep -Seconds 2; Move-Item -LiteralPath (Join-Path $Root '01_KIT') -Destination $old }
+    catch { Fail "코덱스판 폴더를 옮기지 못했습니다. 슬랙 서버·코덱스 창을 모두 닫고 다시 실행하세요. ($($_.Exception.Message))" }
+    Info "보관: $old  (예전 직원·슬랙 열쇠가 그대로 들어 있습니다)"
+}
+
 # ── 4. 표준 위치에 설치 ─────────────────────────────────────
 Step 'C:\Agent 표준 폴더 만들고 스타터킷 설치'
 $code = Run-Script $installer.FullName @('-InstallRoot', $Root, '-NoOpen', '-SkipEnvironmentCheck')

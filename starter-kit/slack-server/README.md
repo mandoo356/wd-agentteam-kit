@@ -34,12 +34,6 @@
 - 서버는 켤 때 `workspace/memory/facts.md` 의 `이름:` 을 읽어 **대표 이름**을 알고 시작합니다 (`.env` 에 `OWNER_NAME=` 을 적으면 그게 우선).
 - `personas.py` 의 아이콘은 `📄` 그대로 넣어도 됩니다. 인사말의 `[무엇]` 은 꼭 채우세요 (카드 P11).
 
-## 이미 설치한 킷 새 판으로 올리기
-
-```powershell
-irm https://raw.githubusercontent.com/mandoo356/wd-agentteam-kit/main/update.ps1 | iex
-```
-
 ## 켜는 법 (모듈 4에서 같이 합니다)
 
 `환경점검.bat` 을 끝까지 돌렸다면 **이미 켜져 있고, PC 를 껐다 켜도 저절로 뜹니다.**
